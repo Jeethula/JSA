@@ -290,9 +290,23 @@ def create_manufacturing_schedule(products: List[Dict], plan_quantities: Dict[st
                     # Calculate units completed from chunk hours
                     # Units = chunk_hours / cycle_time_per_unit
                     units_completed = int(chunk / prod['cycleTimeHours']) if prod.get('cycleTimeHours', 0) > 0 else 0
+                    
+                    # CRITICAL FIX: Cap units to not exceed planned quantity
+                    remaining_quantity = prod['totalQuantity'] - prod['completedQuantity']
+                    if remaining_quantity <= 0:
+                        # Already completed all planned units, skip this product
+                        continue
+                    units_completed = min(units_completed, remaining_quantity)
+                    
                     if units_completed > 0:
                         # Update completed quantity
                         prod['completedQuantity'] += units_completed
+                        # Cap to exact quantity to prevent over-production
+                        if prod['completedQuantity'] >= prod['totalQuantity']:
+                            prod['completedQuantity'] = prod['totalQuantity']
+                            prod['completed'] = True
+                            # Clear remaining hours since we've completed the planned quantity
+                            prod['remainingHours'] = {}
                         # Track in day schedule
                         day_schedule['product_quantities'][prod_id] = day_schedule['product_quantities'].get(prod_id, 0) + units_completed
                     
@@ -413,13 +427,26 @@ def create_manufacturing_schedule(products: List[Dict], plan_quantities: Dict[st
                             else:
                                 prod['remainingHours'][m] = new_remaining
                         
-                        if len(prod['remainingHours']) == 0:
-                            prod['completed'] = True
-                        
                         # Calculate units completed from chunk hours
                         units_completed = int(chunk / prod['cycleTimeHours']) if prod.get('cycleTimeHours', 0) > 0 else 0
+                        
+                        # CRITICAL FIX: Cap units to not exceed planned quantity
+                        remaining_quantity = prod['totalQuantity'] - prod['completedQuantity']
+                        if remaining_quantity <= 0:
+                            # Already completed all planned units, skip this product
+                            continue
+                        units_completed = min(units_completed, remaining_quantity)
+                        
                         if units_completed > 0:
                             prod['completedQuantity'] += units_completed
+                            # Cap to exact quantity to prevent over-production
+                            if prod['completedQuantity'] >= prod['totalQuantity']:
+                                prod['completedQuantity'] = prod['totalQuantity']
+                                prod['completed'] = True
+                                # Clear remaining hours since we've completed the planned quantity
+                                prod['remainingHours'] = {}
+                            elif len(prod['remainingHours']) == 0:
+                                prod['completed'] = True
                             day_schedule['product_quantities'][prod_id] = day_schedule['product_quantities'].get(prod_id, 0) + units_completed
                         
                         if prod_id not in [p['product_id'] for p in day_schedule['products']]:
@@ -498,8 +525,22 @@ def create_manufacturing_schedule(products: List[Dict], plan_quantities: Dict[st
                         
                         # Calculate units completed from chunk hours
                         units_completed = int(chunk / single['cycleTimeHours']) if single.get('cycleTimeHours', 0) > 0 else 0
+                        
+                        # CRITICAL FIX: Cap units to not exceed planned quantity
+                        remaining_quantity = single['totalQuantity'] - single['completedQuantity']
+                        if remaining_quantity <= 0:
+                            # Already completed all planned units, skip this product
+                            continue
+                        units_completed = min(units_completed, remaining_quantity)
+                        
                         if units_completed > 0:
                             single['completedQuantity'] += units_completed
+                            # Cap to exact quantity to prevent over-production
+                            if single['completedQuantity'] >= single['totalQuantity']:
+                                single['completedQuantity'] = single['totalQuantity']
+                                single['completed'] = True
+                                # Clear remaining hours since we've completed the planned quantity
+                                single['remainingHours'] = {}
                             day_schedule['product_quantities'][single_id] = day_schedule['product_quantities'].get(single_id, 0) + units_completed
                         
                         if single_id not in [p['product_id'] for p in day_schedule['products']]:
@@ -879,16 +920,42 @@ with tab2:
                     row_str = ' '.join(row_values)
                     # Check if this row contains typical header keywords
                     if any(keyword in row_str for keyword in ['js code', 'jscode', 'si no', 'station', 'customer', 'part no', 'total schedule']):
-                        header_row = i
+                        header_row = int(i)  # Ensure it's an integer
                         break
+                
+                # Ensure header_row is definitely an integer
+                header_row = int(header_row)
                 
                 # Read CSV with proper header row
                 uploaded_file.seek(0)
+                
                 try:
-                    df = pd.read_csv(uploaded_file, encoding='utf-8', skiprows=header_row, header=0)
-                except UnicodeDecodeError:
+                    # If header_row is 0, use header=0 directly (no skiprows needed)
+                    if header_row == 0:
+                        df = pd.read_csv(uploaded_file, encoding='utf-8', header=0)
+                    else:
+                        # Skip rows before header, then use the first row after skipping as header
+                        # skiprows with a list skips those specific row indices
+                        rows_to_skip = list(range(header_row))
+                        df = pd.read_csv(uploaded_file, encoding='utf-8', skiprows=rows_to_skip, header=0)
+                except (UnicodeDecodeError, ValueError, TypeError) as csv_error:
                     uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, encoding='latin-1', skiprows=header_row, header=0)
+                    try:
+                        if header_row == 0:
+                            df = pd.read_csv(uploaded_file, encoding='latin-1', header=0)
+                        else:
+                            rows_to_skip = list(range(int(header_row)))
+                            df = pd.read_csv(uploaded_file, encoding='latin-1', skiprows=rows_to_skip, header=0)
+                    except Exception as e2:
+                        # Last resort: try reading without any header detection
+                        uploaded_file.seek(0)
+                        try:
+                            df = pd.read_csv(uploaded_file, encoding='utf-8')
+                        except:
+                            uploaded_file.seek(0)
+                            df = pd.read_csv(uploaded_file, encoding='latin-1')
+                        # If we get here, warn user about header detection
+                        st.warning("⚠️ Could not auto-detect header row. Using first row as header.")
                 
                 # Clean column names (remove extra spaces, newlines, and handle trailing text)
                 df.columns = df.columns.str.strip()
@@ -900,7 +967,79 @@ with tab2:
                 df = df.reset_index(drop=True)
             else:
                 # Read Excel file
-                df = pd.read_excel(uploaded_file)
+                # Convert uploaded file to BytesIO for pandas
+                import io
+                
+                # Reset file pointer first
+                uploaded_file.seek(0)
+                file_bytes = uploaded_file.read()
+                file_buffer = io.BytesIO(file_bytes)
+                
+                # Determine engine based on file extension
+                if file_extension == 'xlsx':
+                    engine = 'openpyxl'
+                elif file_extension == 'xls':
+                    engine = 'xlrd'
+                else:
+                    engine = 'openpyxl'  # Default
+                
+                # Read Excel with explicit sheet_name=0 (first sheet) and engine
+                # Use integer 0 explicitly, not a variable that might be string
+                df = None
+                last_error = None
+                
+                # Method 1: Try with specified engine and integer sheet_name
+                try:
+                    file_buffer.seek(0)
+                    df = pd.read_excel(file_buffer, sheet_name=0, engine=engine)
+                except Exception as e1:
+                    last_error = e1
+                    # Method 2: Try without engine (let pandas auto-detect)
+                    try:
+                        file_buffer.seek(0)
+                        df = pd.read_excel(file_buffer, sheet_name=0)
+                    except Exception as e2:
+                        last_error = e2
+                        # Method 3: Try with alternative engine
+                        try:
+                            file_buffer.seek(0)
+                            alt_engine = 'xlrd' if engine == 'openpyxl' else 'openpyxl'
+                            df = pd.read_excel(file_buffer, sheet_name=0, engine=alt_engine)
+                        except Exception as e3:
+                            last_error = e3
+                            # Method 4: Try reading first sheet by name (using string sheet name)
+                            try:
+                                # Create a fresh BytesIO for ExcelFile
+                                file_buffer2 = io.BytesIO(file_bytes)
+                                xl_file = pd.ExcelFile(file_buffer2, engine=engine)
+                                if len(xl_file.sheet_names) > 0:
+                                    first_sheet_name = str(xl_file.sheet_names[0])  # Ensure it's a string
+                                    file_buffer.seek(0)
+                                    df = pd.read_excel(file_buffer, sheet_name=first_sheet_name, engine=engine)
+                                else:
+                                    raise Exception("No sheets found in Excel file")
+                                xl_file.close()
+                            except Exception as e4:
+                                last_error = e4
+                                # Method 5: Last resort - try with None (read all sheets, take first)
+                                try:
+                                    file_buffer.seek(0)
+                                    all_sheets = pd.read_excel(file_buffer, sheet_name=None, engine=engine)
+                                    if all_sheets and len(all_sheets) > 0:
+                                        # Get the first sheet from the dictionary
+                                        first_sheet_key = list(all_sheets.keys())[0]
+                                        df = all_sheets[first_sheet_key]
+                                    else:
+                                        raise Exception("No data found in Excel file")
+                                except Exception as e5:
+                                    last_error = e5
+                                    raise Exception(f"Failed to read Excel file after trying all methods. Last error: {str(last_error)}")
+                
+                if df is None or df.empty:
+                    raise Exception("Excel file appears to be empty or could not be read")
+                
+                # Reset file pointer for potential reuse
+                uploaded_file.seek(0)
             
             st.success("✅ File uploaded successfully!")
             
@@ -1054,8 +1193,24 @@ with tab2:
                 st.rerun()
         
         except Exception as e:
-            st.error(f"Error reading Excel file: {e}")
-            st.info("Please ensure the file is a valid Excel file (.xlsx or .xls)")
+            error_msg = str(e)
+            # Determine if it's CSV or Excel based on file extension
+            if uploaded_file is not None:
+                file_ext = uploaded_file.name.split('.')[-1].lower() if '.' in uploaded_file.name else 'unknown'
+                if file_ext == 'csv':
+                    st.error(f"Error reading CSV file: {error_msg}")
+                    st.info("Please ensure the file is a valid CSV file with proper encoding (UTF-8 or Latin-1)")
+                else:
+                    st.error(f"Error reading Excel file: {error_msg}")
+                    st.info("Please ensure the file is a valid Excel file (.xlsx or .xls)")
+            else:
+                st.error(f"Error reading file: {error_msg}")
+            
+            # Show detailed error for debugging
+            with st.expander("🔍 Error Details"):
+                st.code(f"Error: {error_msg}\nFile: {uploaded_file.name if uploaded_file else 'Unknown'}")
+                import traceback
+                st.code(traceback.format_exc())
     
     st.divider()
     
@@ -1260,132 +1415,174 @@ with tab2:
             if max_chunk == 0:
                 max_chunk = None
         
-        if st.button("🔄 Generate Schedule", type="primary", use_container_width=True):
-            st.session_state.schedule_generated = True
+        generate_clicked = st.button("🔄 Generate Schedule", type="primary", use_container_width=True)
         
-        if st.session_state.get('schedule_generated', False):
+        # Check if we have a cached schedule in session state
+        has_cached_schedule = (
+            'schedule' in st.session_state and 
+            st.session_state.schedule and 
+            len(st.session_state.schedule) > 0
+        )
+        
+        # Generate schedule if button clicked or if we have cached schedule
+        if generate_clicked or has_cached_schedule:
+            if generate_clicked:
+                st.session_state.schedule_generated = True
+                # Clear old schedule when regenerating
+                if 'schedule' in st.session_state:
+                    del st.session_state.schedule
+                    del st.session_state.schedule_product_data
+                    del st.session_state.schedule_remaining
+            
             # Verify we have plan quantities before generating
             if len(st.session_state.plan_quantities) == 0 or all(qty == 0 for qty in st.session_state.plan_quantities.values()):
                 st.error("❌ No production quantities found. Please enter quantities in the plan above first.")
                 st.session_state.schedule_generated = False
             else:
-                # Generate schedule
-                try:
-                    schedule, remaining, product_data = create_manufacturing_schedule(
-                        st.session_state.products,
-                        st.session_state.plan_quantities,
-                        hours_per_day,
-                        max_days=max_days,
-                        max_chunk=max_chunk
+                # Generate schedule if not cached
+                if generate_clicked or not has_cached_schedule:
+                    try:
+                        # Validate inputs before scheduling
+                        if not st.session_state.products:
+                            st.error("❌ No products defined. Please add products in the Product Setup tab.")
+                            st.session_state.schedule_generated = False
+                        elif not st.session_state.plan_quantities:
+                            st.error("❌ No production quantities found. Please enter quantities in the plan above first.")
+                            st.session_state.schedule_generated = False
+                        else:
+                            with st.spinner("🔄 Generating schedule... This may take a moment."):
+                                schedule, remaining, product_data = create_manufacturing_schedule(
+                                    st.session_state.products,
+                                    st.session_state.plan_quantities,
+                                    hours_per_day,
+                                    max_days=max_days,
+                                    max_chunk=max_chunk
+                                )
+                            
+                            # Store in session state for persistence
+                            st.session_state.schedule = schedule
+                            st.session_state.schedule_product_data = product_data
+                            st.session_state.schedule_remaining = remaining
+                            
+                            # Check for remaining quantities
+                            remaining_items = {pid: qty for pid, qty in remaining.items() if qty > 0}
+                            if remaining_items:
+                                st.warning(f"⚠️ Could not schedule all products. Remaining quantities: {remaining_items}")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error generating schedule: {str(e)}")
+                        import traceback
+                        with st.expander("🔍 Error Details"):
+                            st.code(traceback.format_exc())
+                        st.session_state.schedule_generated = False
+                        st.session_state.schedule = None
+                
+                # Display schedule if available (either newly generated or cached)
+                schedule = st.session_state.get('schedule')
+                product_data = st.session_state.get('schedule_product_data', {})
+                
+                if schedule and len(schedule) > 0:
+                    # Get all machines that should be used (from the plan)
+                    all_machines_in_plan = set()
+                    for product in st.session_state.products:
+                        if st.session_state.plan_quantities.get(product['id'], 0) > 0:
+                            for op in product['operations']:
+                                all_machines_in_plan.add(op['machine'])
+                    all_machines_in_plan = sorted(all_machines_in_plan)
+                    
+                    # Display schedule summary
+                    st.success(f"✅ Schedule generated for {len(schedule)} days")
+                    
+                    # Summary metrics
+                    total_days = len(schedule)
+                    total_products_scheduled = sum(len(day['products']) for day in schedule)
+                    avg_utilization = sum(day['total_hours'] for day in schedule) / (total_days * hours_per_day) * 100 if total_days > 0 else 0
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Days", total_days)
+                    with col2:
+                        st.metric("Total Product Runs", total_products_scheduled)
+                    with col3:
+                        st.metric("Avg Daily Utilization", f"{avg_utilization:.1f}%")
+                    with col4:
+                        st.metric("Total Machines in Plan", len(all_machines_in_plan))
+                    
+                    st.divider()
+                    
+                    # Daily schedule table
+                    schedule_data = []
+                    for day_schedule in schedule:
+                        # Format products and machines for this day
+                        products_list = []
+                        machines_list = []
+                        
+                        for prod in day_schedule['products']:
+                            products_list.append(f"{prod['product_id']} ({prod['units']} units)")
+                            machines_list.extend(prod['machines'])
+                        
+                        # Remove duplicates from machines
+                        machines_used = sorted(set(machines_list))
+                        
+                        # Find idle machines (machines in plan but not used this day)
+                        idle_machines = sorted(set(all_machines_in_plan) - set(machines_used))
+                        
+                        schedule_data.append({
+                            "Day": day_schedule['day'],
+                            "Products": ", ".join(products_list) if products_list else "None",
+                            "Machines Used": ", ".join(machines_used) if machines_used else "None",
+                            "Idle Machines": ", ".join(idle_machines) if idle_machines else "None",
+                            "Machines Used / Total": f"{len(machines_used)} / {len(all_machines_in_plan)}",
+                            "Total Hours": f"{day_schedule['total_hours']:.2f}",
+                            "Utilization %": f"{(day_schedule['total_hours'] / hours_per_day * 100):.1f}%"
+                        })
+                    
+                    schedule_df = pd.DataFrame(schedule_data)
+                    st.dataframe(
+                        schedule_df,
+                        use_container_width=True,
+                        hide_index=True
                     )
                     
-                    # Check for remaining quantities
-                    remaining_items = {pid: qty for pid, qty in remaining.items() if qty > 0}
-                    if remaining_items:
-                        st.warning(f"⚠️ Could not schedule all products. Remaining quantities: {remaining_items}")
+                    # Calculate total products in plan
+                    total_products_in_plan = len([p for p in st.session_state.products 
+                                                if st.session_state.plan_quantities.get(p['id'], 0) > 0])
                     
-                    if schedule and len(schedule) > 0:
-                        # Get all machines that should be used (from the plan)
-                        all_machines_in_plan = set()
-                        for product in st.session_state.products:
-                            if st.session_state.plan_quantities.get(product['id'], 0) > 0:
-                                for op in product['operations']:
-                                    all_machines_in_plan.add(op['machine'])
-                        all_machines_in_plan = sorted(all_machines_in_plan)
+                    # Track completion status day by day
+                    # We need to simulate day-by-day to track when products complete
+                    daily_completion_tracker = {}  # day -> {completed: [], remaining: []}
+                    products_completed_so_far = set()
+                    
+                    # Build a map of when products complete by checking remainingHours after each day
+                    for day_idx, day_schedule in enumerate(schedule):
+                        day_num = day_schedule['day']
+                        # Products worked on this day
+                        products_worked_today = set(p['product_id'] for p in day_schedule['products'])
                         
-                        # Display schedule summary
-                        st.success(f"✅ Schedule generated for {len(schedule)} days")
+                        # Check which products completed (we'll check at end, but track incrementally)
+                        # For now, we'll calculate at display time based on current state
+                        daily_completion_tracker[day_num] = {
+                            'products_worked': products_worked_today,
+                            'completed': set(),
+                            'remaining': set()
+                        }
+                    
+                    # Detailed daily view
+                    st.subheader("📋 Detailed Daily Schedule")
+                    cumulative_completed = 0
+                    
+                    for day_idx, day_schedule in enumerate(schedule):
+                        day_num = day_schedule['day']
                         
-                        # Summary metrics
-                        total_days = len(schedule)
-                        total_products_scheduled = sum(len(day['products']) for day in schedule)
-                        avg_utilization = sum(day['total_hours'] for day in schedule) / (total_days * hours_per_day) * 100 if total_days > 0 else 0
+                        # Calculate completed products up to this day
+                        # We need to check product_data state, but since it's final state,
+                        # we'll show current completion status
+                        completed_products = [pid for pid, prod in product_data.items() 
+                                             if prod.get('completed', False)]
+                        cumulative_completed = len(completed_products)
+                        remaining_products = total_products_in_plan - cumulative_completed
                         
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Total Days", total_days)
-                        with col2:
-                            st.metric("Total Product Runs", total_products_scheduled)
-                        with col3:
-                            st.metric("Avg Daily Utilization", f"{avg_utilization:.1f}%")
-                        with col4:
-                            st.metric("Total Machines in Plan", len(all_machines_in_plan))
-                        
-                        st.divider()
-                        
-                        # Daily schedule table
-                        schedule_data = []
-                        for day_schedule in schedule:
-                            # Format products and machines for this day
-                            products_list = []
-                            machines_list = []
-                            
-                            for prod in day_schedule['products']:
-                                products_list.append(f"{prod['product_id']} ({prod['units']} units)")
-                                machines_list.extend(prod['machines'])
-                            
-                            # Remove duplicates from machines
-                            machines_used = sorted(set(machines_list))
-                            
-                            # Find idle machines (machines in plan but not used this day)
-                            idle_machines = sorted(set(all_machines_in_plan) - set(machines_used))
-                            
-                            schedule_data.append({
-                                "Day": day_schedule['day'],
-                                "Products": ", ".join(products_list) if products_list else "None",
-                                "Machines Used": ", ".join(machines_used) if machines_used else "None",
-                                "Idle Machines": ", ".join(idle_machines) if idle_machines else "None",
-                                "Machines Used / Total": f"{len(machines_used)} / {len(all_machines_in_plan)}",
-                                "Total Hours": f"{day_schedule['total_hours']:.2f}",
-                                "Utilization %": f"{(day_schedule['total_hours'] / hours_per_day * 100):.1f}%"
-                            })
-                        
-                        schedule_df = pd.DataFrame(schedule_data)
-                        st.dataframe(
-                            schedule_df,
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                        
-                        # Calculate total products in plan
-                        total_products_in_plan = len([p for p in st.session_state.products 
-                                                    if st.session_state.plan_quantities.get(p['id'], 0) > 0])
-                        
-                        # Track completion status day by day
-                        # We need to simulate day-by-day to track when products complete
-                        daily_completion_tracker = {}  # day -> {completed: [], remaining: []}
-                        products_completed_so_far = set()
-                        
-                        # Build a map of when products complete by checking remainingHours after each day
-                        for day_idx, day_schedule in enumerate(schedule):
-                            day_num = day_schedule['day']
-                            # Products worked on this day
-                            products_worked_today = set(p['product_id'] for p in day_schedule['products'])
-                            
-                            # Check which products completed (we'll check at end, but track incrementally)
-                            # For now, we'll calculate at display time based on current state
-                            daily_completion_tracker[day_num] = {
-                                'products_worked': products_worked_today,
-                                'completed': set(),
-                                'remaining': set()
-                            }
-                        
-                        # Detailed daily view
-                        st.subheader("📋 Detailed Daily Schedule")
-                        cumulative_completed = 0
-                        
-                        for day_idx, day_schedule in enumerate(schedule):
-                            day_num = day_schedule['day']
-                            
-                            # Calculate completed products up to this day
-                            # We need to check product_data state, but since it's final state,
-                            # we'll show current completion status
-                            completed_products = [pid for pid, prod in product_data.items() 
-                                                 if prod.get('completed', False)]
-                            cumulative_completed = len(completed_products)
-                            remaining_products = total_products_in_plan - cumulative_completed
-                            
-                            with st.expander(f"📅 Day {day_schedule['day']} - {day_schedule['total_hours']:.2f} hours ({len(day_schedule['products'])} products)"):
+                        with st.expander(f"📅 Day {day_schedule['day']} - {day_schedule['total_hours']:.2f} hours ({len(day_schedule['products'])} products)"):
                                 # Products for this day (sorted by chunk hours)
                                 sorted_products = sorted(
                                     day_schedule['products'],
@@ -1583,20 +1780,17 @@ with tab2:
                                         st.metric("Total Units Planned", f"{total_units_planned:,}")
                                     with col3:
                                         st.metric("Overall Progress", f"{overall_progress:.1f}%")
-                        
-                        # Download schedule
-                        st.divider()
-                        schedule_csv = schedule_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Schedule as CSV",
-                            data=schedule_csv,
-                            file_name="manufacturing_schedule.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.warning("Could not generate schedule. Please check your production plan.")
-                except Exception as e:
-                    st.error(f"❌ Error generating schedule: {str(e)}")
-                    st.exception(e)
-                    st.session_state.schedule_generated = False
+                    
+                    # Download schedule
+                    st.divider()
+                    schedule_csv = schedule_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Schedule as CSV",
+                        data=schedule_csv,
+                        file_name="manufacturing_schedule.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("Could not generate schedule. Please check your production plan.")
 
