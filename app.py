@@ -1226,13 +1226,20 @@ with tab2:
                 
                 # Show results
                 if imported_count > 0:
+                    # IMPORTANT: Don't rerun immediately - let the success message show
+                    # The quantities are already in session state, so they'll be visible
+                    # on the next natural rerun (when user interacts with UI)
                     st.success(f"✅ Successfully imported {imported_count} product quantities!")
+                    st.info(f"📊 Total quantities now in plan: {sum(st.session_state.plan_quantities.values())} units")
                     # Reset schedule generation flag so user needs to regenerate after import
                     st.session_state.schedule_generated = False
+                    st.session_state.generate_schedule_requested = False  # Also reset this flag
                     if 'schedule' in st.session_state:
                         del st.session_state.schedule
                         del st.session_state.schedule_product_data
                         del st.session_state.schedule_remaining
+                    # Don't rerun - let user see the message and then click Generate Schedule
+                    # The quantities are already in session state and will be used
                 if not_found:
                     unique_not_found = list(set(not_found))[:20]
                     st.warning(f"⚠️ {len(not_found)} product ID(s) not found in system: {', '.join(unique_not_found)}")
@@ -1244,11 +1251,6 @@ with tab2:
                         st.text(err)
                     if len(errors) > 10:
                         st.caption(f"... and {len(errors) - 10} more errors")
-                
-                # Rerun to refresh UI and show updated quantities
-                # This is safe because we've already updated session state
-                if imported_count > 0:
-                    st.rerun()
         
         except Exception as e:
             error_msg = str(e)
@@ -1315,6 +1317,11 @@ with tab2:
     
     # Calculate and Display Results
     st.subheader("📊 Calculated Machine Run Time Requirements")
+    
+    # Debug: Show plan quantities count (can be removed later)
+    total_quantities = sum(st.session_state.plan_quantities.values())
+    if total_quantities > 0:
+        st.info(f"ℹ️ Total quantities in plan: {total_quantities} units across {len([q for q in st.session_state.plan_quantities.values() if q > 0])} products")
     
     machine_times = calculate_machine_time(st.session_state.products, st.session_state.plan_quantities)
     machine_breakdown = calculate_machine_breakdown(st.session_state.products, st.session_state.plan_quantities)
