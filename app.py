@@ -1232,9 +1232,10 @@ with tab2:
                         continue
                 
                 # Show results
+                total_qty = sum(st.session_state.plan_quantities.values())
+                product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
+                
                 if imported_count > 0:
-                    total_qty = sum(st.session_state.plan_quantities.values())
-                    product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
                     st.success(f"✅ Successfully imported {imported_count} product quantities!")
                     st.info(f"📊 Total quantities now in plan: {total_qty:,} units across {product_count} products")
                     # Reset schedule generation flag so user needs to regenerate after import
@@ -1249,6 +1250,14 @@ with tab2:
                     # Rerun to refresh UI and show updated quantities in manual entry and machine calculations
                     # This is safe because we've already updated session state
                     st.rerun()
+                elif total_qty > 0:
+                    # Some quantities exist (from previous imports or manual entry)
+                    st.info(f"📊 Current plan has {total_qty:,} units across {product_count} products (no new imports this time)")
+                    st.session_state.data_imported = True
+                else:
+                    # No quantities imported and none exist
+                    st.warning("⚠️ No quantities were imported. Check if product IDs match your system.")
+                    # Don't set data_imported flag if nothing was imported
                 if not_found:
                     unique_not_found = list(set(not_found))[:20]
                     st.warning(f"⚠️ {len(not_found)} product ID(s) not found in system: {', '.join(unique_not_found)}")
@@ -1456,10 +1465,25 @@ with tab2:
     total_qty = sum(st.session_state.plan_quantities.values())
     product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
     
+    # Debug info (can be removed later)
+    if 'data_imported' in st.session_state and st.session_state.data_imported:
+        with st.expander("🔍 Debug: Check Import Status", expanded=False):
+            st.write(f"Data imported flag: {st.session_state.data_imported}")
+            st.write(f"Plan quantities keys: {len(st.session_state.plan_quantities)}")
+            st.write(f"Total quantity: {total_qty}")
+            st.write(f"Products with quantity > 0: {product_count}")
+            if len(st.session_state.plan_quantities) > 0:
+                st.write("Sample quantities (first 10):")
+                sample = dict(list(st.session_state.plan_quantities.items())[:10])
+                st.json(sample)
+    
     if total_qty == 0:
         st.info("Enter production quantities in the plan above to generate a schedule.")
         if 'data_imported' in st.session_state and st.session_state.data_imported:
-            st.warning("⚠️ Data was imported but quantities appear empty. Please check your file format or try importing again.")
+            st.error("⚠️ **Issue Detected**: Data import flag is set, but quantities are empty. This might indicate:")
+            st.write("- Product IDs in your file don't match the product IDs in the system")
+            st.write("- The import process encountered errors")
+            st.write("- Please check the import warnings above and try again")
     else:
         st.success(f"✅ Ready to generate schedule: {product_count} products with {total_qty:,} total units loaded.")
         # Schedule configuration
@@ -1527,8 +1551,15 @@ with tab2:
             
             # Verify we have plan quantities before generating
             total_qty = sum(st.session_state.plan_quantities.values())
+            product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
+            
             if len(st.session_state.plan_quantities) == 0 or total_qty == 0:
                 st.error("❌ No production quantities found. Please enter quantities in the plan above first.")
+                if 'data_imported' in st.session_state and st.session_state.data_imported:
+                    st.warning("⚠️ Import was attempted but no quantities were saved. This usually means:")
+                    st.write("1. Product IDs in your file don't match the product IDs in the system")
+                    st.write("2. Check the 'not found' warnings from the import above")
+                    st.write("3. Verify your file has the correct Product ID/JS Code column")
                 st.session_state.schedule_generated = False
             else:
                 # Generate schedule if this is a new request or if we don't have a cached schedule
