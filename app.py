@@ -5,6 +5,53 @@ from typing import Dict, List
 from io import BytesIO
 from products_data import SAMPLE_PRODUCTS
 
+# Compatibility helper for button width parameter
+def get_button_width_param():
+    """Returns the appropriate width parameter for buttons based on Streamlit version."""
+    try:
+        import streamlit as st_module
+        version = st_module.__version__
+        # Parse version (e.g., "1.29.0" -> [1, 29, 0])
+        version_parts = [int(x) for x in version.split('.')]
+        # width parameter was added around version 1.40+
+        if version_parts[0] > 1 or (version_parts[0] == 1 and version_parts[1] >= 40):
+            return {'width': 'stretch'}
+        else:
+            return {'use_container_width': True}
+    except:
+        # Fallback to old parameter if version check fails
+        return {'use_container_width': True}
+
+# Compatibility helper for dataframe width parameter
+def get_dataframe_width_param():
+    """Returns the appropriate width parameter for dataframes based on Streamlit version."""
+    try:
+        import streamlit as st_module
+        version = st_module.__version__
+        version_parts = [int(x) for x in version.split('.')]
+        # width parameter for dataframes was added around version 1.40+
+        if version_parts[0] > 1 or (version_parts[0] == 1 and version_parts[1] >= 40):
+            return {'width': 'stretch'}
+        else:
+            return {'use_container_width': True}
+    except:
+        return {'use_container_width': True}
+
+# Compatibility helper for download_button width parameter
+def get_download_button_width_param():
+    """Returns the appropriate width parameter for download buttons based on Streamlit version."""
+    try:
+        import streamlit as st_module
+        version = st_module.__version__
+        version_parts = [int(x) for x in version.split('.')]
+        # width parameter was added around version 1.40+
+        if version_parts[0] > 1 or (version_parts[0] == 1 and version_parts[1] >= 40):
+            return {'width': 'stretch'}
+        else:
+            return {'use_container_width': True}
+    except:
+        return {'use_container_width': True}
+
 # Page configuration
 st.set_page_config(
     page_title="Manufacturing Run Time Planner",
@@ -25,6 +72,8 @@ if 'product_search' not in st.session_state:
     st.session_state.product_search = ""
 if 'schedule_generated' not in st.session_state:
     st.session_state.schedule_generated = False
+if 'generate_schedule_requested' not in st.session_state:
+    st.session_state.generate_schedule_requested = False
 
 # Initialize products if empty
 if len(st.session_state.products) == 0:
@@ -740,7 +789,7 @@ with tab1:
                     st.rerun()
             
             with col2:
-                if st.button("🗑️ Delete Selected", type="primary", use_container_width=True):
+                if st.button("🗑️ Delete Selected", type="primary", **get_button_width_param()):
                     if st.session_state.selected_products:
                         num_deleted = len(st.session_state.selected_products)
                         # Remove selected products
@@ -760,7 +809,7 @@ with tab1:
                         st.warning("Please select at least one product to delete.")
             
             with col3:
-                if st.button("✏️ Edit Selected", use_container_width=True):
+                if st.button("✏️ Edit Selected", **get_button_width_param()):
                     if len(st.session_state.selected_products) == 1:
                         st.session_state.editing_product_id = st.session_state.selected_products[0]
                         st.rerun()
@@ -770,7 +819,7 @@ with tab1:
                         st.warning("Please select a product to edit.")
             
             with col4:
-                if st.button("🔄 Clear Selection", use_container_width=True):
+                if st.button("🔄 Clear Selection", **get_button_width_param()):
                     st.session_state.selected_products = []
                     st.session_state.editing_product_id = None
                     st.rerun()
@@ -813,11 +862,11 @@ with tab1:
                 
                 with col_actions:
                     if not is_editing:
-                        if st.button("✏️ Edit", key=f"edit_{product['id']}", use_container_width=True):
+                        if st.button("✏️ Edit", key=f"edit_{product['id']}", **get_button_width_param()):
                             st.session_state.editing_product_id = product['id']
                             st.rerun()
                     else:
-                        if st.button("❌ Cancel", key=f"cancel_{product['id']}", use_container_width=True):
+                        if st.button("❌ Cancel", key=f"cancel_{product['id']}", **get_button_width_param()):
                             st.session_state.editing_product_id = None
                             st.rerun()
             
@@ -1045,7 +1094,7 @@ with tab2:
             
             # Display preview
             st.write("**File Preview:**")
-            st.dataframe(df.head(10), use_container_width=True)
+            st.dataframe(df.head(10), **get_dataframe_width_param())
             
             # Auto-detect columns for JSA template format
             js_code_col = None
@@ -1190,7 +1239,8 @@ with tab2:
                     if len(errors) > 10:
                         st.caption(f"... and {len(errors) - 10} more errors")
                 
-                st.rerun()
+                # Don't rerun - let user see the import results and manually generate schedule
+                # st.rerun()  # Removed to prevent state reset after file import
         
         except Exception as e:
             error_msg = str(e)
@@ -1326,8 +1376,8 @@ with tab2:
             
             st.dataframe(
                 styled_df,
-                use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                **get_dataframe_width_param()
             )
             
             # Add legend
@@ -1359,7 +1409,7 @@ with tab2:
                 data=summary_csv,
                 file_name="machine_run_times_summary.csv",
                 mime="text/csv",
-                use_container_width=True
+                **get_download_button_width_param()
             )
         
         with col2:
@@ -1370,7 +1420,7 @@ with tab2:
                 data=detailed_csv,
                 file_name="machine_run_times_detailed.csv",
                 mime="text/csv",
-                use_container_width=True
+                **get_download_button_width_param()
             )
     
     # Manufacturing Schedule Section
@@ -1415,7 +1465,11 @@ with tab2:
             if max_chunk == 0:
                 max_chunk = None
         
-        generate_clicked = st.button("🔄 Generate Schedule", type="primary", use_container_width=True)
+        generate_clicked = st.button("🔄 Generate Schedule", type="primary", **get_button_width_param())
+        
+        # Set flag when button is clicked (persists across reruns)
+        if generate_clicked:
+            st.session_state.generate_schedule_requested = True
         
         # Check if we have a cached schedule in session state
         has_cached_schedule = (
@@ -1424,10 +1478,16 @@ with tab2:
             len(st.session_state.schedule) > 0
         )
         
-        # Generate schedule if button clicked or if we have cached schedule
-        if generate_clicked or has_cached_schedule:
-            if generate_clicked:
+        # Generate schedule if button was clicked (via flag) or if we have cached schedule
+        should_generate = st.session_state.generate_schedule_requested or has_cached_schedule
+        
+        if should_generate:
+            # Check if this is a new generation request (not just displaying cached)
+            is_new_generation = st.session_state.generate_schedule_requested
+            
+            if is_new_generation:
                 st.session_state.schedule_generated = True
+                st.session_state.generate_schedule_requested = False  # Reset flag after processing
                 # Clear old schedule when regenerating
                 if 'schedule' in st.session_state:
                     del st.session_state.schedule
@@ -1439,8 +1499,8 @@ with tab2:
                 st.error("❌ No production quantities found. Please enter quantities in the plan above first.")
                 st.session_state.schedule_generated = False
             else:
-                # Generate schedule if not cached
-                if generate_clicked or not has_cached_schedule:
+                # Generate schedule if this is a new request or if we don't have a cached schedule
+                if is_new_generation or not has_cached_schedule:
                     try:
                         # Validate inputs before scheduling
                         if not st.session_state.products:
@@ -1540,8 +1600,8 @@ with tab2:
                     schedule_df = pd.DataFrame(schedule_data)
                     st.dataframe(
                         schedule_df,
-                        use_container_width=True,
-                        hide_index=True
+                        hide_index=True,
+                        **get_dataframe_width_param()
                     )
                     
                     # Calculate total products in plan
@@ -1638,7 +1698,7 @@ with tab2:
                                     }
                                     for machine, data in sorted(machine_util.items())
                                 ])
-                                st.dataframe(util_df, use_container_width=True, hide_index=True)
+                                st.dataframe(util_df, hide_index=True, **get_dataframe_width_param())
                                 
                                 # Show idle machines warning if any
                                 idle_count = sum(1 for data in machine_util.values() if data['status'] == 'Idle')
@@ -1764,8 +1824,8 @@ with tab2:
                                     progress_df = progress_df.sort_values(by=['Progress %', 'Product ID'])
                                     st.dataframe(
                                         progress_df,
-                                        use_container_width=True,
-                                        hide_index=True
+                                        hide_index=True,
+                                        **get_dataframe_width_param()
                                     )
                                     
                                     # Summary metrics
@@ -1789,7 +1849,7 @@ with tab2:
                         data=schedule_csv,
                         file_name="manufacturing_schedule.csv",
                         mime="text/csv",
-                        use_container_width=True
+                        **get_download_button_width_param()
                     )
                 else:
                     st.warning("Could not generate schedule. Please check your production plan.")
