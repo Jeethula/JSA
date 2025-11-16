@@ -1227,6 +1227,12 @@ with tab2:
                 # Show results
                 if imported_count > 0:
                     st.success(f"✅ Successfully imported {imported_count} product quantities!")
+                    # Reset schedule generation flag so user needs to regenerate after import
+                    st.session_state.schedule_generated = False
+                    if 'schedule' in st.session_state:
+                        del st.session_state.schedule
+                        del st.session_state.schedule_product_data
+                        del st.session_state.schedule_remaining
                 if not_found:
                     unique_not_found = list(set(not_found))[:20]
                     st.warning(f"⚠️ {len(not_found)} product ID(s) not found in system: {', '.join(unique_not_found)}")
@@ -1239,8 +1245,10 @@ with tab2:
                     if len(errors) > 10:
                         st.caption(f"... and {len(errors) - 10} more errors")
                 
-                # Don't rerun - let user see the import results and manually generate schedule
-                # st.rerun()  # Removed to prevent state reset after file import
+                # Rerun to refresh UI and show updated quantities
+                # This is safe because we've already updated session state
+                if imported_count > 0:
+                    st.rerun()
         
         except Exception as e:
             error_msg = str(e)
