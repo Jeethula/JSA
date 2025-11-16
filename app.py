@@ -1221,12 +1221,19 @@ with tab2:
                         
                         quantity = int(quantity)
                         
-                        # If product already has a quantity, add to it (for duplicate JS Codes)
-                        if prod_id in st.session_state.plan_quantities:
-                            st.session_state.plan_quantities[prod_id] += quantity
-                        else:
-                            st.session_state.plan_quantities[prod_id] = quantity
-                        imported_count += 1
+                        # Only import if quantity is positive
+                        if quantity > 0:
+                            # If product already has a quantity, add to it (for duplicate JS Codes)
+                            if prod_id in st.session_state.plan_quantities:
+                                # Only add if existing quantity is also positive (don't add to 0 from manual entry)
+                                existing_qty = st.session_state.plan_quantities[prod_id]
+                                if existing_qty > 0:
+                                    st.session_state.plan_quantities[prod_id] += quantity
+                                else:
+                                    st.session_state.plan_quantities[prod_id] = quantity
+                            else:
+                                st.session_state.plan_quantities[prod_id] = quantity
+                            imported_count += 1
                     except Exception as e:
                         errors.append(f"Row {idx+2}: {str(e)}")
                         continue
@@ -1329,7 +1336,27 @@ with tab2:
                                     key=f"qty_{product['id']}",
                                     help=product['name']
                                 )
-                                st.session_state.plan_quantities[product['id']] = qty
+                                # CRITICAL: Only update if user actually changed the value
+                                # This prevents manual entry from overwriting imported values
+                                # Use session state to track the last known value for this widget
+                                widget_key = f"last_qty_{product['id']}"
+                                last_qty = st.session_state.get(widget_key, current_qty)
+                                
+                                # Only update if:
+                                # 1. Value changed from last known value (user interaction)
+                                # 2. OR this is a new product not in plan_quantities yet
+                                if qty != last_qty:
+                                    st.session_state.plan_quantities[product['id']] = qty
+                                    st.session_state[widget_key] = qty
+                                else:
+                                    # Preserve existing value - don't overwrite imported data
+                                    if product['id'] in st.session_state.plan_quantities:
+                                        # Keep the existing value (might be from import)
+                                        pass
+                                    else:
+                                        # New product, set to widget value
+                                        st.session_state.plan_quantities[product['id']] = qty
+                                        st.session_state[widget_key] = qty
     
     st.divider()
     
