@@ -1327,36 +1327,37 @@ with tab2:
                     for j, col in enumerate(cols):
                         if i + j < len(products):
                             product = products[i + j]
-                            current_qty = st.session_state.plan_quantities.get(product['id'], 0)
+                            # Get the stored quantity (from import or previous manual entry)
+                            stored_qty = st.session_state.plan_quantities.get(product['id'], 0)
+                            
                             with col:
+                                # Create widget with stored value
                                 qty = st.number_input(
                                     f"{product['id']}",
                                     min_value=0,
-                                    value=int(current_qty),
+                                    value=int(stored_qty),  # Use stored value, not current_qty
                                     key=f"qty_{product['id']}",
                                     help=product['name']
                                 )
-                                # CRITICAL: Only update if user actually changed the value
-                                # This prevents manual entry from overwriting imported values
-                                # Use session state to track the last known value for this widget
-                                widget_key = f"last_qty_{product['id']}"
-                                last_qty = st.session_state.get(widget_key, current_qty)
+                                
+                                # CRITICAL FIX: Prevent manual entry from overwriting imported values
+                                # The widget value might reset to 0 on rerun, so we need to be very careful
                                 
                                 # Only update if:
-                                # 1. Value changed from last known value (user interaction)
-                                # 2. OR this is a new product not in plan_quantities yet
-                                if qty != last_qty:
-                                    st.session_state.plan_quantities[product['id']] = qty
-                                    st.session_state[widget_key] = qty
-                                else:
-                                    # Preserve existing value - don't overwrite imported data
-                                    if product['id'] in st.session_state.plan_quantities:
-                                        # Keep the existing value (might be from import)
+                                # 1. The value changed from stored value (potential user interaction)
+                                # 2. AND it's a safe change (not overwriting positive with 0)
+                                if qty != stored_qty:
+                                    # Safety check: Never overwrite a positive stored value with 0
+                                    # This prevents widget resets from clearing imported data
+                                    if stored_qty > 0 and qty == 0:
+                                        # Widget reset detected - DO NOT UPDATE, preserve imported value
+                                        # Force the widget to show the correct value by not updating session state
                                         pass
-                                    else:
-                                        # New product, set to widget value
+                                    elif qty > 0 or stored_qty == 0:
+                                        # Safe to update: either new value is positive, or stored was 0
                                         st.session_state.plan_quantities[product['id']] = qty
-                                        st.session_state[widget_key] = qty
+                                    # If stored_qty > 0 and qty == 0, we already handled it above (pass)
+                                # If qty == stored_qty, no change needed - preserve the stored value
     
     st.divider()
     
