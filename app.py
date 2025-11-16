@@ -1226,11 +1226,9 @@ with tab2:
                 
                 # Show results
                 if imported_count > 0:
-                    # IMPORTANT: Don't rerun immediately - let the success message show
-                    # The quantities are already in session state, so they'll be visible
-                    # on the next natural rerun (when user interacts with UI)
                     st.success(f"✅ Successfully imported {imported_count} product quantities!")
-                    st.info(f"📊 Total quantities now in plan: {sum(st.session_state.plan_quantities.values())} units")
+                    total_qty = sum(st.session_state.plan_quantities.values())
+                    st.info(f"📊 Total quantities now in plan: {total_qty} units across {len([q for q in st.session_state.plan_quantities.values() if q > 0])} products")
                     # Reset schedule generation flag so user needs to regenerate after import
                     st.session_state.schedule_generated = False
                     st.session_state.generate_schedule_requested = False  # Also reset this flag
@@ -1238,8 +1236,9 @@ with tab2:
                         del st.session_state.schedule
                         del st.session_state.schedule_product_data
                         del st.session_state.schedule_remaining
-                    # Don't rerun - let user see the message and then click Generate Schedule
-                    # The quantities are already in session state and will be used
+                    # Rerun to refresh UI and show updated quantities in manual entry and machine calculations
+                    # This is safe because we've already updated session state
+                    st.rerun()
                 if not_found:
                     unique_not_found = list(set(not_found))[:20]
                     st.warning(f"⚠️ {len(not_found)} product ID(s) not found in system: {', '.join(unique_not_found)}")
@@ -1510,7 +1509,8 @@ with tab2:
                     del st.session_state.schedule_remaining
             
             # Verify we have plan quantities before generating
-            if len(st.session_state.plan_quantities) == 0 or all(qty == 0 for qty in st.session_state.plan_quantities.values()):
+            total_qty = sum(st.session_state.plan_quantities.values())
+            if len(st.session_state.plan_quantities) == 0 or total_qty == 0:
                 st.error("❌ No production quantities found. Please enter quantities in the plan above first.")
                 st.session_state.schedule_generated = False
             else:
