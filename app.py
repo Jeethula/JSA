@@ -940,10 +940,17 @@ with tab2:
     
     # File Upload Section (Excel or CSV)
     st.subheader("📤 Upload File (Excel or CSV)")
+    
+    # Show persistent message if data was imported (even after rerun)
+    if 'plan_quantities' in st.session_state and sum(st.session_state.plan_quantities.values()) > 0:
+        total_qty = sum(st.session_state.plan_quantities.values())
+        product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
+        st.success(f"✅ **Data loaded**: {product_count} products with {total_qty:,} total units in plan. You can generate the schedule now!")
+    
     uploaded_file = st.file_uploader(
         "Upload Excel or CSV file with Product IDs and Quantities",
         type=['xlsx', 'xls', 'csv'],
-        help="Upload Excel (.xlsx, .xls) or CSV file with Product ID/JS Code and Quantity columns"
+        help="Upload Excel (.xlsx, .xls) or CSV file with Product ID/JS Code and Quantity columns. Data persists after import - you don't need to re-upload."
     )
     
     if uploaded_file is not None:
@@ -1226,9 +1233,10 @@ with tab2:
                 
                 # Show results
                 if imported_count > 0:
-                    st.success(f"✅ Successfully imported {imported_count} product quantities!")
                     total_qty = sum(st.session_state.plan_quantities.values())
-                    st.info(f"📊 Total quantities now in plan: {total_qty} units across {len([q for q in st.session_state.plan_quantities.values() if q > 0])} products")
+                    product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
+                    st.success(f"✅ Successfully imported {imported_count} product quantities!")
+                    st.info(f"📊 Total quantities now in plan: {total_qty:,} units across {product_count} products")
                     # Reset schedule generation flag so user needs to regenerate after import
                     st.session_state.schedule_generated = False
                     st.session_state.generate_schedule_requested = False  # Also reset this flag
@@ -1236,6 +1244,8 @@ with tab2:
                         del st.session_state.schedule
                         del st.session_state.schedule_product_data
                         del st.session_state.schedule_remaining
+                    # Store import timestamp to show persistent message
+                    st.session_state.data_imported = True
                     # Rerun to refresh UI and show updated quantities in manual entry and machine calculations
                     # This is safe because we've already updated session state
                     st.rerun()
@@ -1442,9 +1452,16 @@ with tab2:
     st.subheader("📅 Daily Manufacturing Schedule")
     st.caption("Schedule showing which products to manufacture each day. All operations of a product run simultaneously.")
     
-    if len(st.session_state.plan_quantities) == 0 or all(qty == 0 for qty in st.session_state.plan_quantities.values()):
+    # Check plan quantities
+    total_qty = sum(st.session_state.plan_quantities.values())
+    product_count = len([q for q in st.session_state.plan_quantities.values() if q > 0])
+    
+    if total_qty == 0:
         st.info("Enter production quantities in the plan above to generate a schedule.")
+        if 'data_imported' in st.session_state and st.session_state.data_imported:
+            st.warning("⚠️ Data was imported but quantities appear empty. Please check your file format or try importing again.")
     else:
+        st.success(f"✅ Ready to generate schedule: {product_count} products with {total_qty:,} total units loaded.")
         # Schedule configuration
         col1, col2, col3 = st.columns(3)
         with col1:
