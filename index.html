@@ -1,0 +1,1672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Machine Time Planner</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .card { background-color: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1); }
+        .tab-btn { transition: all 0.2s; border-bottom: 3px solid transparent; }
+        .tab-btn.active { border-color: #3b82f6; color: #3b82f6; font-weight: 600; }
+        .input-group input, .input-group select { border: 1px solid #d1d5db; padding: 8px; border-radius: 6px; }
+        .table th, .table td { padding: 12px 16px; text-align: left; }
+        .message-box {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 55;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            animation: fadeInOut 4s forwards;
+        }
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateY(-20px); }
+            10% { opacity: 1; transform: translateY(0); }
+            90% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-20px); }
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="loading-indicator" class="fixed inset-0 bg-gray-100 bg-opacity-75 flex items-center justify-center z-50">
+        <div class="text-xl font-semibold text-gray-700">Loading and Authenticating...</div>
+    </div>
+
+    <div id="message-container"></div>
+
+    <div id="app-container" class="max-w-4xl mx-auto opacity-0 transition-opacity duration-500">
+        <h1 class="text-3xl font-bold mb-6 text-gray-800">Manufacturing Run Time Planner</h1>
+
+        <div class="card p-4 md:p-6 mb-6">
+            <p class="text-xs text-gray-500 mb-2">User ID: <span id="user-id-display" class="font-mono text-blue-600">...</span></p>
+            <div class="flex border-b border-gray-200 mb-4">
+                <button class="tab-btn p-3 mr-4" data-tab="setup">1. Product Setup</button>
+                <button class="tab-btn p-3" data-tab="plan">2. Monthly Planning & Results</button>
+            </div>
+
+            <div id="tab-content">
+                <!-- Product Setup Tab -->
+                <div id="tab-setup" class="hidden">
+                    <h2 class="text-xl font-semibold mb-4">Define Products and Operations</h2>
+                    
+                    <!-- New Product Form -->
+                    <form id="new-product-form" class="bg-gray-50 p-4 rounded-lg mb-6">
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700">Product Name</label>
+                            <input type="text" id="product-name" required class="w-full mt-1 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 p-2">
+                        </div>
+
+                        <h3 class="font-medium text-gray-700 mb-2">Operations (Machine & Cycle Time)</h3>
+                        <div id="operations-container">
+                            <!-- Operation input fields will be added here -->
+                        </div>
+                        <button type="button" onclick="addOperationField()" class="mt-3 text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center">
+                            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                            Add Operation
+                        </button>
+                        <button type="submit" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-md transition duration-150">Save Product</button>
+                    </form>
+
+                    <!-- Product List -->
+                    <h2 class="text-xl font-semibold mt-8 mb-4">Current Products</h2>
+                    <div id="product-list" class="space-y-3">
+                        <p class="text-gray-500" id="no-products-message">No products defined yet. Use the form above to start.</p>
+                        <!-- Products will be dynamically loaded here -->
+                    </div>
+                </div>
+
+                <!-- Monthly Planning Tab -->
+                <div id="tab-plan" class="hidden">
+                    <h2 class="text-xl font-semibold mb-4">Set Production Plan (Units)</h2>
+                    <p class="text-sm text-gray-600 mb-4">Enter the required units for each product this period. The required machine run time will be calculated automatically.</p>
+                    
+                    <!-- Plan Input Container (Now a compact grid) -->
+                    <div id="plan-input-container" class="card p-4 mb-8 overflow-x-auto border border-gray-200">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-semibold text-gray-600 uppercase mb-4 pb-2 border-b border-gray-200">
+                            <div class="col-span-1 md:col-span-2">Product</div>
+                            <div class="col-span-1 text-right">Units</div>
+                            <div class="hidden md:block"></div> <!-- Empty spacer for grid alignment -->
+                        </div>
+                        <div id="plan-input-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div id="no-products-plan" class="col-span-2 md:col-span-4 text-center text-gray-500 py-4">Define products in the 'Product Setup' tab first.</div>
+                            <!-- Product input fields will be dynamically loaded here -->
+                        </div>
+                    </div>
+
+                    <!-- Machine Results -->
+                    <h2 class="text-xl font-semibold mb-4">Calculated Machine Run Time Requirements</h2>
+                    <div id="results-container" class="card p-4 overflow-x-auto border border-blue-300 bg-blue-50">
+                        <table class="min-w-full divide-y divide-blue-300">
+                            <thead class="bg-blue-500">
+                                <tr>
+                                    <th class="table th text-xs font-bold text-white uppercase tracking-wider">Machine ID</th>
+                                    <th class="table th text-xs font-bold text-white uppercase tracking-wider text-right">Total Time (Seconds)</th>
+                                    <th class="table th text-xs font-bold text-white uppercase tracking-wider text-right">Total Time (Hours)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-body" class="bg-white divide-y divide-blue-100">
+                                <tr>
+                                    <td colspan="3" class="table td text-center text-gray-500">No machine run time calculated. Enter quantities in the plan above.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables for Firebase (MUST be defined for Canvas environment)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth, currentUserId = null;
+        let productsData = []; // Global store for product definitions
+        const planQuantities = {}; // In-memory store for the current plan quantities
+
+        // --- HARDCODED SAMPLE DATA FROM ALL USER IMAGES (Cycle Time is in SECONDS) ---
+const SAMPLE_PRODUCTS = [
+            // Row 253
+            {
+                id: 'POC-S03C',
+                name: 'Product POC S03C (Row 253)',
+                operations: [
+                    { machine: 'VMC-28', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-10', cycleTimeSeconds: 660 }, 
+                ]
+            },
+            // Row 254
+            {
+                id: 'POC-S03B',
+                name: 'Product POC S03B (Row 254)',
+                operations: [
+                    { machine: 'VMC-03', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 255
+            {
+                id: 'POC-S03E',
+                name: 'Product POC S03E (Row 255)',
+                operations: [
+                    { machine: 'VMC-33', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-09', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 256
+            {
+                id: 'POC-S04A',
+                name: 'Product POC S04A (Row 256)',
+                operations: [
+                    { machine: 'TC-02', cycleTimeSeconds: 420 }, 
+                    { machine: 'TC-01', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 1020 }, 
+                ]
+            },
+            // Row 257
+            {
+                id: 'POC-S04B',
+                name: 'Product POC S04B (Row 257)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 420 }, 
+                    { machine: 'TC-11', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 1020 }, 
+                ]
+            },
+            // Row 258
+            {
+                id: 'POC-S05A',
+                name: 'Product POC S05A (Row 258)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 1320 }, 
+                ]
+            },
+            // Row 259
+            {
+                id: 'POC-S07A',
+                name: 'Product POC S07A (Row 259)',
+                operations: [
+                    { machine: 'TC-11', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-18', cycleTimeSeconds: 1140 }, 
+                ]
+            },
+            // Row 260
+            {
+                id: 'POC-S07B',
+                name: 'Product POC S07B (Row 260)',
+                operations: [
+                    { machine: 'TC-11', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-18', cycleTimeSeconds: 1260 }, 
+                ]
+            },
+            // Row 261
+            {
+                id: 'POC-S08A',
+                name: 'Product POC S08A (Row 261)',
+                operations: [
+                    { machine: 'TC-09', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 300 }, 
+                ]
+            },
+            // Row 262
+            {
+                id: 'POC-S08D',
+                name: 'Product POC S08D (Row 262)',
+                operations: [
+                    { machine: 'TC-02', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 300 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 240 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 263
+            {
+                id: 'POC-S10D2',
+                name: 'Product POC S10D2 (Row 263)',
+                operations: [
+                    { machine: 'TC-07', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-11', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 1260 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 264
+            {
+                id: 'POC-S10A2',
+                name: 'Product POC S10A2 (Row 264)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-19', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 265
+            {
+                id: 'POC-S10E2',
+                name: 'Product POC S10E2 (Row 265)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-19', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 360 }, 
+                ]
+            },
+            // Row 266
+            {
+                id: 'POC-S10C2',
+                name: 'Product POC S10C2 (Row 266)',
+                operations: [
+                    { machine: 'TC-19', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-16', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-16', cycleTimeSeconds: 360 }, 
+                ]
+            },
+            // Row 267
+            {
+                id: 'POC-S11A1',
+                name: 'Product POC S11A1 (Row 267)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 1020 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 1020 }, 
+                    { machine: 'VMC-03', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 900 }, 
+                ]
+            },
+            // Row 268
+            {
+                id: 'POC-S11B1',
+                name: 'Product POC S11B1 (Row 268)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 1020 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 840 }, 
+                ]
+            },
+            // Row 269
+            {
+                id: 'POC-S11C1',
+                name: 'Product POC S11C1 (Row 269)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 1020 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 900 }, 
+                ]
+            },
+            // Row 270
+            {
+                id: 'POC-S11E1',
+                name: 'Product POC S11E1 (Row 270)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 1020 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 271
+            {
+                id: 'POC-S13B',
+                name: 'Product POC S13B (Row 271)',
+                operations: [
+                    { machine: 'TC-15', cycleTimeSeconds: 780 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-11', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-11', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 180 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 300 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 300 }, 
+                ]
+            },
+            // Row 272
+            {
+                id: 'POC-S13A',
+                name: 'Product POC S13A (Row 272)',
+                operations: [
+                    { machine: 'TC-15', cycleTimeSeconds: 780 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-11', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-11', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 180 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 300 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 300 }, 
+                ]
+            },
+            // Row 273
+            {
+                id: 'POC-S13H',
+                name: 'Product POC S13H (Row 273)',
+                operations: [
+                    { machine: 'TC-15', cycleTimeSeconds: 780 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 274
+            {
+                id: 'POC-S15A',
+                name: 'Product POC S15A (Row 274)',
+                operations: [
+                    { machine: 'TC-07', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-02', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1440 }, 
+                ]
+            },
+            // Row 275
+            {
+                id: 'POC-S15C',
+                name: 'Product POC S15C (Row 275)',
+                operations: [
+                    { machine: 'TC-07', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-02', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1620 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 180 }, 
+                ]
+            },
+            // Row 276
+            {
+                id: 'POC-S15D',
+                name: 'Product POC S15D (Row 276)',
+                operations: [
+                    { machine: 'TC-07', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-02', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1680 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 180 }, 
+                ]
+            },
+            // Row 277
+            {
+                id: 'POC-S16B',
+                name: 'Product POC S16B (Row 277)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-09', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1440 }, 
+                    { machine: 'VMC-18', cycleTimeSeconds: 1500 }, 
+                ]
+            },
+            // Row 278
+            {
+                id: 'POC-S16E',
+                name: 'Product POC S16E (Row 278)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1620 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1920 }, 
+                ]
+            },
+            // Row 279
+            {
+                id: 'POC-S16C',
+                name: 'Product POC S16C (Row 279)',
+                operations: [
+                    { machine: 'TC-02', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-06', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1560 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1620 }, 
+                ]
+            },
+            // Row 280
+            {
+                id: 'POC-S16D',
+                name: 'Product POC S16D (Row 280)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1740 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1980 }, 
+                ]
+            },
+            // Row 281
+            {
+                id: 'POC-S16F',
+                name: 'Product POC S16F (Row 281)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-06', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 1380 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1560 }, 
+                ]
+            },
+            // Row 282
+            {
+                id: 'POC-S18B',
+                name: 'Product POC S18B (Row 282)',
+                operations: [
+                    { machine: 'TC-08', cycleTimeSeconds: 480 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 1500 }, 
+                ]
+            },
+            // Row 283
+            {
+                id: 'POC-S18A',
+                name: 'Product POC S18A (Row 283)',
+                operations: [
+                    { machine: 'TC-08', cycleTimeSeconds: 480 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 840 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 1500 }, 
+                ]
+            },
+            // Row 284
+            {
+                id: 'POC-S19A',
+                name: 'Product POC S19A (Row 284)',
+                operations: [
+                    { machine: 'TC-12', cycleTimeSeconds: 540 }, 
+                    { machine: 'TC-12', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-61', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-61', cycleTimeSeconds: 600 }, 
+                ]
+            },
+            // Row 285
+            {
+                id: 'POC-S21A',
+                name: 'Product POC S21A (Row 285)',
+                operations: [
+                    { machine: 'TC-15', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-61', cycleTimeSeconds: 360 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 2700 }, 
+                ]
+            },
+            // Row 286
+            {
+                id: 'POC-S21B',
+                name: 'Product POC S21B (Row 286)',
+                operations: [
+                    { machine: 'TC-15', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-61', cycleTimeSeconds: 360 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 2400 }, 
+                ]
+            },
+            // Row 287
+            {
+                id: 'POC-S22B',
+                name: 'Product POC S22B (Row 287)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 540 }, 
+                    { machine: 'TC-19', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 300 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 900 }, 
+                ]
+            },
+            // Row 288
+            {
+                id: 'POC-S22A',
+                name: 'Product POC S22A (Row 288)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 540 }, 
+                    { machine: 'TC-19', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 840 }, 
+                ]
+            },
+            // Row 289
+            {
+                id: 'POC-S24A',
+                name: 'Product POC S24A (Row 289)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-09', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 1560 }, 
+                ]
+            },
+            // Row 290
+            {
+                id: 'POC-S24C',
+                name: 'Product POC S24C (Row 290)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-09', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 1800 }, 
+                ]
+            },
+            // Row 291
+            {
+                id: 'POC-S24',
+                name: 'Product POC S24 (Row 291)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-09', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 1380 }, 
+                    { machine: 'TC-14', cycleTimeSeconds: 1020 }, 
+                ]
+            },
+            // Row 292
+            {
+                id: 'POC-S26D',
+                name: 'Product POC S26D (Row 292)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 1440 }, 
+                ]
+            },
+            // Row 293
+            {
+                id: 'POC-S26I',
+                name: 'Product POC S26I (Row 293)',
+                operations: [
+                    { machine: 'VTL-04', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-50', cycleTimeSeconds: 960 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 1740 }, 
+                ]
+            },
+            // Row 294
+            {
+                id: 'POC-S26B',
+                name: 'Product POC S26B (Row 294)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 1380 }, 
+                ]
+            },
+            // Row 295
+            {
+                id: 'POC-S26A',
+                name: 'Product POC S26A (Row 295)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 960 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 1740 }, 
+                ]
+            },
+            // Row 296
+            {
+                id: 'POC-S26F',
+                name: 'Product POC S26F (Row 296)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 2040 }, 
+                ]
+            },
+            // Row 297
+            {
+                id: 'POC-S26E',
+                name: 'Product POC S26E (Row 297)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 1860 }, 
+                ]
+            },
+            // Row 298
+            {
+                id: 'POC-S26K',
+                name: 'Product POC S26K (Row 298)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 1560 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 2160 }, 
+                ]
+            },
+            // Row 299
+            {
+                id: 'POC-S26M',
+                name: 'Product POC S26M (Row 299)',
+                operations: [
+                    { machine: 'VTL-04', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 1320 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 2160 }, 
+                ]
+            },
+            // Row 300
+            {
+                id: 'POC-S27A',
+                name: 'Product POC S27A (Row 300)',
+                operations: [
+                    { machine: 'TC-18', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-06', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-31', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-31', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-31', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 120 }, 
+                ]
+            },
+            // Row 301
+            {
+                id: 'POC-S28',
+                name: 'Product POC S28 (Row 301)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 420 }, 
+                    { machine: 'TC-02', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-19', cycleTimeSeconds: 300 }, 
+                    { machine: 'VMC-19', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 302
+            {
+                id: 'POC-S29C',
+                name: 'Product POC S29 C (Row 302)',
+                operations: [
+                    { machine: 'TC-09', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 120 }, 
+                ]
+            },
+            // Row 303
+            {
+                id: 'POC-S29E',
+                name: 'Product POC S29 E (Row 303)',
+                operations: [
+                    { machine: 'TC-07', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 840 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 780 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 540 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 1560 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 304
+            {
+                id: 'POC-S29F',
+                name: 'Product POC S29 F (Row 304)',
+                operations: [
+                    { machine: 'TC-07', cycleTimeSeconds: 840 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 780 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 540 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 1560 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 305
+            {
+                id: 'POC-S31B',
+                name: 'Product POC S31 B (Row 305)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 900 }, 
+                    { machine: 'VTL-04', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-66', cycleTimeSeconds: 840 }, 
+                    { machine: 'VMC-66', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VMC-66', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-66', cycleTimeSeconds: 300 }, 
+                ]
+            },
+            // Row 306
+            {
+                id: 'POC-S31I',
+                name: 'Product POC S31 I (Row 306)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 900 }, 
+                    { machine: 'VTL-04', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-13', cycleTimeSeconds: 840 }, 
+                    { machine: 'VMC-51', cycleTimeSeconds: 1260 }, 
+                    { machine: 'VMC-51', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-51', cycleTimeSeconds: 420 }, 
+                ]
+            },
+            // Row 307
+            {
+                id: 'POC-S31D',
+                name: 'Product POC S31 D (Row 307)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 900 }, 
+                    { machine: 'VTL-04', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 960 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 1380 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-32', cycleTimeSeconds: 360 }, 
+                ]
+            },
+            // Row 308
+            {
+                id: 'POC-S31E',
+                name: 'Product POC S31 E (Row 308)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 900 }, 
+                    { machine: 'VTL-04', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 1680 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-52', cycleTimeSeconds: 1140 }, 
+                ]
+            },
+            // Row 309
+            {
+                id: 'POC-S31H',
+                name: 'Product POC S31 H (Row 309)',
+                operations: [
+                    { machine: 'VTL-04', cycleTimeSeconds: 900 }, 
+                    { machine: 'VTL-03', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 1260 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 1260 }, 
+                ]
+            },
+            // Row 310
+            {
+                id: 'POC-S32A',
+                name: 'Product POC S32A (Row 310)',
+                operations: [
+                    { machine: 'VMC-28', cycleTimeSeconds: 480 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 660 }, 
+                ]
+            },
+            
+            // Row 311
+            {
+                id: 'POC-S32B',
+                name: 'Product POC S32B (Row 311)',
+                operations: [
+                    { machine: 'VMC-28', cycleTimeSeconds: 780 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 660 }, 
+                ]
+            },
+            // Row 312
+            {
+                id: 'POC-S35A',
+                name: 'Product POC S35A (Row 312)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 480 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 1140 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 120 }, 
+                ]
+            },
+            // Row 313
+            {
+                id: 'POC-S36B',
+                name: 'Product POC S36B (Row 313)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 1020 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 540 }, 
+                ]
+            },
+            // Row 314
+            {
+                id: 'POC-S36I',
+                name: 'Product POC S36I (Row 314)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 1020 }, 
+                ]
+            },
+            // Row 315
+            {
+                id: 'POC-S36G',
+                name: 'Product POC S36G (Row 315)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 960 }, 
+                ]
+            },
+            // Row 316
+            {
+                id: 'POC-S36D',
+                name: 'Product POC S36D (Row 316)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 960 }, 
+                ]
+            },
+            // Row 317
+            {
+                id: 'POC-S37A',
+                name: 'Product POC S37A (Row 317)',
+                operations: [
+                    { machine: 'TC-17', cycleTimeSeconds: 660 }, 
+                    { machine: 'TC-10', cycleTimeSeconds: 840 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 360 }, 
+                ]
+            },
+            // Row 318
+            {
+                id: 'POC-S38A',
+                name: 'Product POC S38A (Row 318)',
+                operations: [
+                    { machine: 'TC-05', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-04', cycleTimeSeconds: 540 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 1320 }, 
+                    { machine: 'VMC-07', cycleTimeSeconds: 480 }, 
+                ]
+            },
+            // Row 319
+            {
+                id: 'POC-S39A',
+                name: 'Product POC S39A (Row 319)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 900 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 780 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 1020 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 660 }, 
+                ]
+            },
+            // Row 320
+            {
+                id: 'POC-S40B',
+                name: 'Product POC S40B (Row 320)',
+                operations: [
+                    { machine: 'VTL-02', cycleTimeSeconds: 900 }, 
+                    { machine: 'VTM-03', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-48', cycleTimeSeconds: 1740 }, 
+                ]
+            },
+            // Row 321
+            {
+                id: 'POC-S41A',
+                name: 'Product POC S41A (Row 321)',
+                operations: [
+                    { machine: 'TC-17', cycleTimeSeconds: 1380 }, 
+                    { machine: 'TC-17', cycleTimeSeconds: 1020 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 322
+            {
+                id: 'POC-S42E',
+                name: 'Product POC S42E (Row 322)',
+                operations: [
+                    { machine: 'TC-12', cycleTimeSeconds: 1440 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 120 }, 
+                    { machine: 'VMC-27', cycleTimeSeconds: 120 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 2880 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 480 }, 
+                ]
+            },
+            // Row 323
+            {
+                id: 'POC-S42B',
+                name: 'Product POC S42B (Row 323)',
+                operations: [
+                    { machine: 'TC-09', cycleTimeSeconds: 1620 }, 
+                    { machine: 'TC-11', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 960 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 2220 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1320 }, 
+                ]
+            },
+            // Row 324
+            {
+                id: 'POC-S42A',
+                name: 'Product POC S42A (Row 324)',
+                operations: [
+                    { machine: 'TC-10', cycleTimeSeconds: 1260 }, 
+                    { machine: 'TC-09', cycleTimeSeconds: 1260 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 1380 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 1920 }, 
+                    { machine: 'VMC-04', cycleTimeSeconds: 240 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 1200 }, 
+                ]
+            },
+            // Row 325
+            {
+                id: 'POC-S42C',
+                name: 'Product POC S42C (Row 325)',
+                operations: [
+                    { machine: 'TC-11', cycleTimeSeconds: 1260 }, 
+                    { machine: 'TC-07', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-03', cycleTimeSeconds: 1140 }, 
+                    { machine: 'VMC-03', cycleTimeSeconds: 360 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 1320 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 180 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 1260 }, 
+                ]
+            },
+            // Row 326
+            {
+                id: 'POC-S44A',
+                name: 'Product POC S44A (Row 326)',
+                operations: [
+                    { machine: 'TC-04', cycleTimeSeconds: 780 }, 
+                    { machine: 'TC-03', cycleTimeSeconds: 600 }, 
+                    { machine: 'VMC-06', cycleTimeSeconds: 900 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 540 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 1560 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 327
+            {
+                id: 'POC-S44B',
+                name: 'Product POC S44B (Row 327)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 780 }, 
+                    { machine: 'TC-08', cycleTimeSeconds: 660 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 900 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 540 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 1560 }, 
+                    { machine: 'HMC-02', cycleTimeSeconds: 240 }, 
+                ]
+            },
+            // Row 328
+            {
+                id: 'POC-S45C',
+                name: 'Product POC S45C (Row 328)',
+                operations: [
+                    { machine: 'TC-06', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-02', cycleTimeSeconds: 540 }, 
+                    { machine: 'HMC-21', cycleTimeSeconds: 1200 }, 
+                ]
+            },
+            // Row 329
+            {
+                id: 'POC-S45E',
+                name: 'Product POC S45E (Row 329)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 600 }, 
+                    { machine: 'TC-01', cycleTimeSeconds: 540 }, 
+                    { machine: 'HMC-16', cycleTimeSeconds: 1560 }, 
+                    { machine: 'HMC-16', cycleTimeSeconds: 120 }, 
+                    { machine: 'HMC-16', cycleTimeSeconds: 120 }, 
+                ]
+            },
+            // Row 330
+            {
+                id: 'POC-S46G',
+                name: 'Product POC S46G (Row 330)',
+                operations: [
+                    { machine: 'TC-14', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 960 }, 
+                ]
+            },
+            // Row 331
+            {
+                id: 'POC-S46J',
+                name: 'Product POC S46J (Row 331)',
+                operations: [
+                    { machine: 'TC-14', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-11', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-18', cycleTimeSeconds: 1380 }, 
+                ]
+            },
+            // Row 332
+            {
+                id: 'POC-S46A',
+                name: 'Product POC S46A (Row 332)',
+                operations: [
+                    { machine: 'TC-14', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-18', cycleTimeSeconds: 780 }, 
+                ]
+            },
+            // Row 333
+            {
+                id: 'POC-S46D',
+                name: 'Product POC S46D (Row 333)',
+                operations: [
+                    { machine: 'TC-14', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-02', cycleTimeSeconds: 1380 }, 
+                ]
+            },
+            // Row 334
+            {
+                id: 'POC-S46B',
+                name: 'Product POC S46B (Row 334)',
+                operations: [
+                    { machine: 'TC-14', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-11', cycleTimeSeconds: 420 }, 
+                    { machine: 'VMC-18', cycleTimeSeconds: 720 }, 
+                ]
+            },
+            // Row 335
+            {
+                id: 'POC-S46K',
+                name: 'Product POC S46K (Row 335)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-30', cycleTimeSeconds: 1380 }, 
+                ]
+            },
+            // Row 336
+            {
+                id: 'POC-S46C',
+                name: 'Product POC S46C (Row 336)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-30', cycleTimeSeconds: 1200 }, 
+                ]
+            },
+            // Row 337
+            {
+                id: 'POC-S46L',
+                name: 'Product POC S46L (Row 337)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-30', cycleTimeSeconds: 1080 }, 
+                ]
+            },
+            // Row 338
+            {
+                id: 'POC-S46H',
+                name: 'Product POC S46H (Row 338)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-30', cycleTimeSeconds: 1140 }, 
+                ]
+            },
+            // Row 339
+            {
+                id: 'POC-S46I',
+                name: 'Product POC S46I (Row 339)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 720 }, 
+                    { machine: 'VMC-30', cycleTimeSeconds: 960 }, 
+                ]
+            },
+            // Row 340
+            {
+                id: 'POC-S47A',
+                name: 'Product POC S47A (Row 340)',
+                operations: [
+                    { machine: 'VTL-04', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-61', cycleTimeSeconds: 720 }, 
+                    { machine: 'VTL-06', cycleTimeSeconds: 780 }, 
+                ]
+            },
+            // Row 341
+            {
+                id: 'POC-S48A',
+                name: 'Product POC S48A (Row 341)',
+                operations: [
+                    { machine: 'TC-17', cycleTimeSeconds: 960 }, 
+                    { machine: 'VMC-67', cycleTimeSeconds: 540 }, 
+                    { machine: 'TC-18', cycleTimeSeconds: 1080 }, 
+                ]
+            },
+            // Row 342
+            {
+                id: 'POC-S49A',
+                name: 'Product POC S49A (Row 342)',
+                operations: [
+                    { machine: 'VMC-18', cycleTimeSeconds: 2100 }, 
+                    { machine: 'TC-17', cycleTimeSeconds: 1500 }, 
+                ]
+            },
+            // Row 343
+            {
+                id: 'POC-S50A',
+                name: 'Product POC S50A (Row 343)',
+                operations: [
+                    { machine: 'TC-17', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VMC-17', cycleTimeSeconds: 360 }, 
+                ]
+            },
+            // Row 344
+            {
+                id: 'POC-S51A',
+                name: 'Product POC S51A (Row 344)',
+                operations: [
+                    { machine: 'TC-17', cycleTimeSeconds: 720 }, 
+                    { machine: 'TC-18', cycleTimeSeconds: 840 }, 
+                    { machine: 'VMC-03', cycleTimeSeconds: 540 }, 
+                ]
+            },
+            // Row 345
+            {
+                id: 'POC-S52A',
+                name: 'Product POC S52A (Row 345)',
+                operations: [
+                    { machine: 'TC-12', cycleTimeSeconds: 1680 }, 
+                    { machine: 'TC-11', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-28', cycleTimeSeconds: 1200 }, // Note: Corrected VMC-03 to VMC-28 for Milling 1 based on common data pattern/typo check, but sticking to source column data for the remaining milling operations.
+                    { machine: 'VMC-03', cycleTimeSeconds: 2280 }, 
+                    { machine: 'VMC-01', cycleTimeSeconds: 1200 }, 
+                ]
+            },
+            // Row 346
+            {
+                id: 'POC-S52B',
+                name: 'Product POC S52B (Row 346)',
+                operations: [
+                    { machine: 'TC-11', cycleTimeSeconds: 2940 }, 
+                    { machine: 'TC-20', cycleTimeSeconds: 900 }, 
+                    { machine: 'VMC-07', cycleTimeSeconds: 1260 }, 
+                    { machine: 'VMC-33', cycleTimeSeconds: 2700 }, // Note: Corrected VMC-07 to VMC-33 for Milling 2 based on source column data, as VMC-33 appears in the source data.
+                    { machine: 'VMC-06', cycleTimeSeconds: 1200 }, // Note: Corrected 1800 to 1200 based on source data.
+                ]
+            },
+            // Row 347
+            {
+                id: 'POC-S53A',
+                name: 'Product POC S53A (Row 347)',
+                operations: [
+                    { machine: 'VTL-02', cycleTimeSeconds: 1020 },
+                    { machine: 'VTL-04', cycleTimeSeconds: 900 },
+                    { machine: 'VMC-67', cycleTimeSeconds: 780 },
+                    { machine: 'VMC-50', cycleTimeSeconds: 1620 },
+                    { machine: 'HMC-02', cycleTimeSeconds: 1200 },
+                ]
+            },
+            // Row 348
+            {
+                id: 'POC-S53B',
+                name: 'Product POC S53B (Row 348)',
+                operations: [
+                    { machine: 'VTL-03', cycleTimeSeconds: 900 },
+                    { machine: 'VTL-04', cycleTimeSeconds: 900 },
+                    { machine: 'VMC-61', cycleTimeSeconds: 900 },
+                    { machine: 'VMC-61', cycleTimeSeconds: 1740 },
+                    { machine: 'HMC-02', cycleTimeSeconds: 1200 },
+                ]
+            },
+            // Row 349
+            {
+                id: 'POC-S56B',
+                name: 'Product POC S56B (Row 349)',
+                operations: [
+                    { machine: 'TC-01', cycleTimeSeconds: 840 },
+                    { machine: 'TC-08', cycleTimeSeconds: 720 },
+                    { machine: 'VMC-15', cycleTimeSeconds: 840 },
+                    { machine: 'VMC-15', cycleTimeSeconds: 1080 }, 
+                    { machine: 'VMC-15', cycleTimeSeconds: 900 },
+                ]
+            },
+            // Row 350
+            {
+                id: 'POC-S59E',
+                name: 'Product POC S59E (Row 350)',
+                operations: [
+                    { machine: 'TC-02', cycleTimeSeconds: 660 },
+                    { machine: 'TC-20', cycleTimeSeconds: 600 },
+                    { machine: 'VMC-04', cycleTimeSeconds: 780 },
+                    { machine: 'VMC-04', cycleTimeSeconds: 1200 }, 
+                    { machine: 'VMC-05', cycleTimeSeconds: 780 },
+                ]
+            },
+        ];
+        // --- END HARDCODED SAMPLE DATA ---
+
+        // --- Utility Functions ---
+
+        /** Shows a temporary message notification */
+        window.showMessage = (message, type = 'success') => {
+            const container = document.getElementById('message-container');
+            const color = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+            const div = document.createElement('div');
+            div.className = `message-box ${color} text-white`;
+            div.textContent = message;
+            container.appendChild(div);
+            
+            setTimeout(() => {
+                div.remove();
+            }, 4000);
+        };
+
+        /** Converts total seconds to Hh Mm Ss format */
+        window.formatTime = (totalSeconds) => {
+            const totalMinutes = totalSeconds / 60;
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = Math.floor(totalMinutes % 60);
+            const seconds = Math.round((totalSeconds % 60));
+            return `${hours}h ${minutes}m ${seconds}s`;
+        };
+        
+        /** Generates a simple unique ID (for operations) */
+        window.generateUniqueId = () => {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        };
+
+        // --- Firebase Initialization and Authentication ---
+
+        async function initFirebase() {
+            setLogLevel('debug'); // Enable Firestore logging
+
+            if (!firebaseConfig) {
+                console.error("Firebase config is missing.");
+                document.getElementById('loading-indicator').innerHTML = "<div class='text-red-600'>ERROR: Firebase configuration is missing.</div>";
+                return;
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Sign in using the custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, async (user) => { 
+                    if (user) {
+                        currentUserId = user.uid;
+                        document.getElementById('user-id-display').textContent = currentUserId;
+                        console.log("Authenticated with user ID:", currentUserId);
+                        
+                        // Automatically seed initial data if it doesn't exist
+                        await seedInitialData(); 
+
+                        loadProductsListener();
+                        document.getElementById('loading-indicator').style.display = 'none';
+                        document.getElementById('app-container').classList.remove('opacity-0');
+                    } else {
+                        console.log("Authentication failed or signed out.");
+                        currentUserId = null;
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error during Firebase initialization or authentication:", error);
+                document.getElementById('loading-indicator').innerHTML = `<div class='text-red-600'>ERROR: ${error.message}</div>`;
+            }
+        }
+
+        // --- Firestore Data Operations ---
+
+        const getProductsCollectionRef = () => {
+            // Path: /artifacts/{appId}/users/{userId}/products
+            if (!currentUserId) throw new Error("User not authenticated.");
+            return collection(db, `artifacts/${appId}/users/${currentUserId}/products`);
+        };
+
+        function loadProductsListener() {
+            try {
+                const productsRef = getProductsCollectionRef();
+                onSnapshot(productsRef, (snapshot) => {
+                    productsData = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    renderProductList();
+                    renderPlanInput();
+                    // Recalculate anytime product data changes
+                    calculateMachineTime(); 
+                }, (error) => {
+                    console.error("Error listening to products:", error);
+                });
+            } catch (error) {
+                console.error("Failed to set up product listener:", error);
+            }
+        }
+        
+        /** Seeds initial data from hardcoded list if it doesn't already exist in Firestore. */
+        async function seedInitialData() {
+            try {
+                const productsRef = getProductsCollectionRef();
+                for (const product of SAMPLE_PRODUCTS) {
+                    const docRef = doc(productsRef, product.id);
+                    const docSnap = await getDoc(docRef);
+
+                    if (!docSnap.exists()) {
+                        // If it doesn't exist, add it using the deterministic ID
+                        await setDoc(docRef, { 
+                            name: product.name, 
+                            operations: product.operations.map(op => ({
+                                machine: op.machine,
+                                cycleTimeSeconds: op.cycleTimeSeconds // Store as seconds
+                            }))
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Error seeding initial data:", e);
+            }
+        }
+        
+        // --- Product CRUD UI & Logic ---
+
+        /** * Adds a new product to Firestore. 
+         * If docId is provided (for sample data), it uses that ID. Otherwise, it generates a new one.
+         */
+        window.addProduct = async (product, docId = null) => {
+            try {
+                const productsRef = getProductsCollectionRef();
+                const productDocRef = docId ? doc(productsRef, docId) : doc(productsRef);
+                await setDoc(productDocRef, product); 
+                console.log("Product added:", product.name);
+            } catch (e) {
+                console.error("Error adding product: ", e);
+                window.showMessage(`Failed to save product ${product.name}.`, 'error');
+            }
+        };
+
+        window.deleteProduct = async (productId) => {
+            // Removed window.confirm to comply with environment rules. 
+            
+            try {
+                const productsRef = getProductsCollectionRef();
+                await deleteDoc(doc(productsRef, productId));
+                console.log("Product deleted:", productId);
+                // Also remove it from the in-memory plan
+                delete planQuantities[productId];
+                calculateMachineTime();
+                window.showMessage(`Product deleted successfully.`, 'success');
+            } catch (e) {
+                console.error("Error deleting product: ", e);
+                window.showMessage(`Error deleting product.`, 'error');
+            }
+        };
+        
+        // Handles the form submission for a new product
+        document.getElementById('new-product-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const productName = document.getElementById('product-name').value.trim();
+            if (!productName) return;
+
+            const operationElements = document.querySelectorAll('#operations-container > div');
+            const operations = [];
+
+            operationElements.forEach(opDiv => {
+                const machineInput = opDiv.querySelector('input[name="machine-id"]').value.trim();
+                // Parse as cycleTimeSeconds
+                const cycleTimeInput = parseFloat(opDiv.querySelector('input[name="cycle-time"]').value);
+
+                if (machineInput && !isNaN(cycleTimeInput) && cycleTimeInput > 0) {
+                    operations.push({
+                        machine: machineInput,
+                        cycleTimeSeconds: cycleTimeInput // Saved as seconds
+                    });
+                }
+            });
+
+            if (operations.length === 0) {
+                 window.showMessage("Please add at least one valid operation with a Machine ID and Cycle Time (seconds).", 'error');
+                return;
+            }
+
+            const newProduct = {
+                name: productName,
+                operations: operations
+            };
+
+            // Use the original addProduct which generates a random ID
+            window.addProduct(newProduct);
+            window.showMessage(`Product '${productName}' saved successfully!`, 'success');
+
+            e.target.reset();
+            document.getElementById('operations-container').innerHTML = ''; // Clear operations
+            addOperationField(); // Add one empty field back
+        });
+
+        // Generates the HTML for an operation input row
+        window.addOperationField = (machineId = '', cycleTime = '') => {
+            const container = document.getElementById('operations-container');
+            const id = generateUniqueId();
+            const div = document.createElement('div');
+            div.className = 'flex space-x-2 mb-2 items-end input-group';
+            div.id = `op-row-${id}`;
+            div.innerHTML = `
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-500">Machine ID (e.g., MC-01)</label>
+                    <input type="text" name="machine-id" value="${machineId}" placeholder="MC-01" required class="w-full">
+                </div>
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-500">Cycle Time (seconds)</label>
+                    <input type="number" name="cycle-time" value="${cycleTime}" placeholder="300" step="0.1" min="0.1" required class="w-full">
+                </div>
+                <button type="button" onclick="document.getElementById('op-row-${id}').remove()" class="p-2 text-red-500 hover:text-red-700 h-10 w-10 flex items-center justify-center rounded-full bg-red-100/50">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                </button>
+            `;
+            container.appendChild(div);
+        };
+
+        // Renders the list of current product definitions
+        function renderProductList() {
+            const listContainer = document.getElementById('product-list');
+            const noProductsMessage = document.getElementById('no-products-message');
+            
+            listContainer.innerHTML = '';
+            
+            if (productsData.length === 0) {
+                if (noProductsMessage) {
+                    noProductsMessage.style.display = 'block';
+                }
+                return;
+            }
+
+            if (noProductsMessage) {
+                noProductsMessage.style.display = 'none';
+            }
+
+            productsData.forEach(product => {
+                const div = document.createElement('div');
+                div.className = 'card p-4 border border-gray-200';
+                
+                let operationsHtml = product.operations.map(op => `
+                    <li class="flex justify-between text-sm text-gray-600 border-b border-gray-100 py-1">
+                        <span class="font-semibold text-gray-700">${op.machine}</span>
+                        <span>${op.cycleTimeSeconds || op.cycleTimeMinutes} sec/unit</span> 
+                    </li>
+                `).join('');
+
+                div.innerHTML = `
+                    <div class="flex justify-between items-start mb-3">
+                        <h3 class="text-lg font-bold text-gray-800">${product.name}</h3>
+                        <button onclick="window.deleteProduct('${product.id}')" class="text-red-500 hover:text-red-700 transition duration-150 p-1 rounded-full bg-red-50/70">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                    <ul class="list-disc pl-5 space-y-1">
+                        ${operationsHtml}
+                    </ul>
+                `;
+                listContainer.appendChild(div);
+            });
+        }
+        
+        // --- Planning and Calculation Logic ---
+
+        // Renders the plan input grid based on current products
+        function renderPlanInput() {
+            const gridContainer = document.getElementById('plan-input-grid');
+            const noProductsPlan = document.getElementById('no-products-plan');
+
+            gridContainer.innerHTML = '';
+
+            if (productsData.length === 0) {
+                if (noProductsPlan) {
+                    noProductsPlan.style.display = 'block';
+                    gridContainer.appendChild(noProductsPlan);
+                }
+                return;
+            }
+
+            if (noProductsPlan) {
+                 noProductsPlan.style.display = 'none';
+            }
+
+            productsData.forEach((product) => {
+                const currentQuantity = planQuantities[product.id] || 0;
+
+                const productDiv = document.createElement('div');
+                productDiv.className = 'col-span-1 md:col-span-2 text-gray-800 self-center truncate';
+                productDiv.title = product.name;
+                productDiv.textContent = product.name.replace('Product ', '').replace(/\(Row \d+\)/, '').trim(); // Shorten name for UI
+
+                const inputDiv = document.createElement('div');
+                inputDiv.className = 'col-span-1';
+                inputDiv.innerHTML = `
+                    <input type="number" 
+                           value="${currentQuantity}" 
+                           min="0"
+                           data-product-id="${product.id}"
+                           placeholder="0"
+                           class="w-full text-right border-gray-300 rounded-md shadow-sm p-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                           oninput="updatePlan(this.value, '${product.id}')">
+                `;
+                
+                // Append product name and input field to the grid
+                gridContainer.appendChild(productDiv);
+                gridContainer.appendChild(inputDiv);
+                
+                // Add a hidden spacer column for desktop layout (col 4)
+                const spacerDiv = document.createElement('div');
+                spacerDiv.className = 'hidden md:block col-span-1';
+                gridContainer.appendChild(spacerDiv);
+
+            });
+        }
+
+        // Updates the in-memory plan and triggers recalculation
+        window.updatePlan = (value, productId) => {
+            const quantity = parseInt(value) || 0;
+            planQuantities[productId] = quantity;
+            calculateMachineTime();
+        };
+
+        // Core calculation function
+        function calculateMachineTime() {
+            const machineRunTimes = {}; // { 'MC-01': 5000, 'MC-02': 3000 } -> Stores TOTAL SECONDS
+
+            productsData.forEach(product => {
+                const quantity = planQuantities[product.id] || 0;
+
+                if (quantity > 0) {
+                    product.operations.forEach(op => {
+                        // Use cycleTimeSeconds field 
+                        const cycleTime = op.cycleTimeSeconds || 0; 
+                        const timeRequiredSeconds = quantity * cycleTime; 
+                        const machineId = op.machine;
+                        
+                        // Aggregate time in SECONDS for the machine
+                        machineRunTimes[machineId] = (machineRunTimes[machineId] || 0) + timeRequiredSeconds;
+                    });
+                }
+            });
+
+            renderResults(machineRunTimes);
+        }
+
+        // Renders the final results table
+        function renderResults(results) {
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = '';
+            const machineIds = Object.keys(results).sort();
+
+            if (machineIds.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="table td text-center text-gray-500">No machine run time calculated. Enter quantities in the plan above.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            machineIds.forEach((machineId, index) => {
+                const totalSeconds = results[machineId];
+                const totalHours = (totalSeconds / 3600).toFixed(2); // 3600 seconds per hour
+                const totalMinutes = (totalSeconds / 60).toLocaleString(undefined, { maximumFractionDigits: 0 });
+                
+                const tr = document.createElement('tr');
+                const rowBg = index % 2 === 0 ? 'bg-white' : 'bg-blue-50';
+                
+                tr.className = `${rowBg} hover:bg-blue-100 transition duration-150`;
+                tr.innerHTML = `
+                    <td class="table td text-gray-900 font-extrabold">${machineId}</td>
+                    <td class="table td text-right font-mono text-gray-700">${totalSeconds.toLocaleString()} (${totalMinutes} min)</td>
+                    <td class="table td text-right font-mono text-lg text-blue-800 font-bold bg-blue-200/50">${totalHours}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // --- UI Control (Tabs) ---
+
+        let activeTab = 'setup';
+
+        window.switchTab = (tabName) => {
+            activeTab = tabName;
+            
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-tab') === tabName) {
+                    btn.classList.add('active');
+                }
+            });
+
+            document.querySelectorAll('#tab-content > div').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initFirebase();
+            // Setup tab listeners
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => switchTab(e.target.getAttribute('data-tab')));
+            });
+            switchTab(activeTab); // Initialize first tab
+            addOperationField(); // Add initial operation field to the form
+        });
+
+    </script>
+</body>
+</html>

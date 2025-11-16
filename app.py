@@ -1264,329 +1264,339 @@ with tab2:
             st.session_state.schedule_generated = True
         
         if st.session_state.get('schedule_generated', False):
-            # Generate schedule
-            schedule, remaining, product_data = create_manufacturing_schedule(
-                st.session_state.products,
-                st.session_state.plan_quantities,
-                hours_per_day,
-                max_days=max_days,
-                max_chunk=max_chunk
-            )
-            
-            # Check for remaining quantities
-            remaining_items = {pid: qty for pid, qty in remaining.items() if qty > 0}
-            if remaining_items:
-                st.warning(f"⚠️ Could not schedule all products. Remaining quantities: {remaining_items}")
-            
-            if schedule:
-                # Get all machines that should be used (from the plan)
-                all_machines_in_plan = set()
-                for product in st.session_state.products:
-                    if st.session_state.plan_quantities.get(product['id'], 0) > 0:
-                        for op in product['operations']:
-                            all_machines_in_plan.add(op['machine'])
-                all_machines_in_plan = sorted(all_machines_in_plan)
-                
-                # Display schedule summary
-                st.success(f"✅ Schedule generated for {len(schedule)} days")
-                
-                # Summary metrics
-                total_days = len(schedule)
-                total_products_scheduled = sum(len(day['products']) for day in schedule)
-                avg_utilization = sum(day['total_hours'] for day in schedule) / (total_days * hours_per_day) * 100 if total_days > 0 else 0
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Total Days", total_days)
-                with col2:
-                    st.metric("Total Product Runs", total_products_scheduled)
-                with col3:
-                    st.metric("Avg Daily Utilization", f"{avg_utilization:.1f}%")
-                with col4:
-                    st.metric("Total Machines in Plan", len(all_machines_in_plan))
-                
-                st.divider()
-                
-                # Daily schedule table
-                schedule_data = []
-                for day_schedule in schedule:
-                    # Format products and machines for this day
-                    products_list = []
-                    machines_list = []
+            # Verify we have plan quantities before generating
+            if len(st.session_state.plan_quantities) == 0 or all(qty == 0 for qty in st.session_state.plan_quantities.values()):
+                st.error("❌ No production quantities found. Please enter quantities in the plan above first.")
+                st.session_state.schedule_generated = False
+            else:
+                # Generate schedule
+                try:
+                    schedule, remaining, product_data = create_manufacturing_schedule(
+                        st.session_state.products,
+                        st.session_state.plan_quantities,
+                        hours_per_day,
+                        max_days=max_days,
+                        max_chunk=max_chunk
+                    )
                     
-                    for prod in day_schedule['products']:
-                        products_list.append(f"{prod['product_id']} ({prod['units']} units)")
-                        machines_list.extend(prod['machines'])
+                    # Check for remaining quantities
+                    remaining_items = {pid: qty for pid, qty in remaining.items() if qty > 0}
+                    if remaining_items:
+                        st.warning(f"⚠️ Could not schedule all products. Remaining quantities: {remaining_items}")
                     
-                    # Remove duplicates from machines
-                    machines_used = sorted(set(machines_list))
-                    
-                    # Find idle machines (machines in plan but not used this day)
-                    idle_machines = sorted(set(all_machines_in_plan) - set(machines_used))
-                    
-                    schedule_data.append({
-                        "Day": day_schedule['day'],
-                        "Products": ", ".join(products_list) if products_list else "None",
-                        "Machines Used": ", ".join(machines_used) if machines_used else "None",
-                        "Idle Machines": ", ".join(idle_machines) if idle_machines else "None",
-                        "Machines Used / Total": f"{len(machines_used)} / {len(all_machines_in_plan)}",
-                        "Total Hours": f"{day_schedule['total_hours']:.2f}",
-                        "Utilization %": f"{(day_schedule['total_hours'] / hours_per_day * 100):.1f}%"
-                    })
-                
-                schedule_df = pd.DataFrame(schedule_data)
-                st.dataframe(
-                    schedule_df,
-                    use_container_width=True,
-                    hide_index=True
-                )
-                
-                # Calculate total products in plan
-                total_products_in_plan = len([p for p in st.session_state.products 
-                                            if st.session_state.plan_quantities.get(p['id'], 0) > 0])
-                
-                # Track completion status day by day
-                # We need to simulate day-by-day to track when products complete
-                daily_completion_tracker = {}  # day -> {completed: [], remaining: []}
-                products_completed_so_far = set()
-                
-                # Build a map of when products complete by checking remainingHours after each day
-                for day_idx, day_schedule in enumerate(schedule):
-                    day_num = day_schedule['day']
-                    # Products worked on this day
-                    products_worked_today = set(p['product_id'] for p in day_schedule['products'])
-                    
-                    # Check which products completed (we'll check at end, but track incrementally)
-                    # For now, we'll calculate at display time based on current state
-                    daily_completion_tracker[day_num] = {
-                        'products_worked': products_worked_today,
-                        'completed': set(),
-                        'remaining': set()
-                    }
-                
-                # Detailed daily view
-                st.subheader("📋 Detailed Daily Schedule")
-                cumulative_completed = 0
-                
-                for day_idx, day_schedule in enumerate(schedule):
-                    day_num = day_schedule['day']
-                    
-                    # Calculate completed products up to this day
-                    # We need to check product_data state, but since it's final state,
-                    # we'll show current completion status
-                    completed_products = [pid for pid, prod in product_data.items() 
-                                         if prod.get('completed', False)]
-                    cumulative_completed = len(completed_products)
-                    remaining_products = total_products_in_plan - cumulative_completed
-                    
-                    with st.expander(f"📅 Day {day_schedule['day']} - {day_schedule['total_hours']:.2f} hours ({len(day_schedule['products'])} products)"):
-                        # Products for this day (sorted by chunk hours)
-                        sorted_products = sorted(
-                            day_schedule['products'],
-                            key=lambda x: x.get('chunk_hours', x.get('time_hours', 0)),
-                            reverse=True
-                        )
-                        
-                        for prod in sorted_products:
-                            chunk_hours = prod.get('chunk_hours', prod.get('time_hours', 0))
-                            is_coordinated = prod.get('coordinated', True)
-                            
-                            st.write(f"**{prod['product_id']}** - {chunk_hours:.2f} hours")
-                            st.write(f"  - **Type:** {'Multi-op (Coordinated)' if is_coordinated else 'Single-op'}")
-                            st.write(f"  - **Machines (all run simultaneously):** {', '.join(prod['machines'])}")
-                            st.write(f"  - **Total Time:** {prod.get('time_hours', chunk_hours):.2f} hours")
-                            st.write("---")
-                        
-                        # Machine utilization - show ALL machines in plan
-                        st.write("**Machine Utilization (All Machines in Plan):**")
-                        machine_util = {}
-                        
-                        # Get all machines from the plan
-                        all_machines = set()
+                    if schedule and len(schedule) > 0:
+                        # Get all machines that should be used (from the plan)
+                        all_machines_in_plan = set()
                         for product in st.session_state.products:
                             if st.session_state.plan_quantities.get(product['id'], 0) > 0:
                                 for op in product['operations']:
-                                    all_machines.add(op['machine'])
+                                    all_machines_in_plan.add(op['machine'])
+                        all_machines_in_plan = sorted(all_machines_in_plan)
                         
-                        for machine in sorted(all_machines):
-                            if machine in day_schedule['machine_end_times']:
-                                # Machine was used
-                                time_used = day_schedule['machine_end_times'].get(machine, 0) / 3600
-                                util_pct = (time_used / hours_per_day) * 100
-                                machine_util[machine] = {
-                                    'hours': time_used,
-                                    'utilization': util_pct,
-                                    'status': 'Used'
-                                }
-                            else:
-                                # Machine is idle
-                                machine_util[machine] = {
-                                    'hours': 0.0,
-                                    'utilization': 0.0,
-                                    'status': 'Idle'
-                                }
+                        # Display schedule summary
+                        st.success(f"✅ Schedule generated for {len(schedule)} days")
                         
-                        util_df = pd.DataFrame([
-                            {
-                                "Machine": machine,
-                                "Status": data['status'],
-                                "Hours Used": f"{data['hours']:.2f}",
-                                "Utilization": f"{data['utilization']:.1f}%"
-                            }
-                            for machine, data in sorted(machine_util.items())
-                        ])
-                        st.dataframe(util_df, use_container_width=True, hide_index=True)
-                        
-                        # Show idle machines warning if any
-                        idle_count = sum(1 for data in machine_util.values() if data['status'] == 'Idle')
-                        if idle_count > 0:
-                            idle_machines_list = [machine for machine, data in machine_util.items() if data['status'] == 'Idle']
-                            st.warning(f"⚠️ {idle_count} machine(s) idle this day: {', '.join(idle_machines_list)}")
-                        
-                        st.divider()
-                        
-                        # Daily Progress Summary
-                        st.subheader("📊 Daily Progress Summary")
-                        
-                        # Calculate products completed today (newly completed)
-                        # A product is completed today if:
-                        # 1. It was worked on today
-                        # 2. It's marked as completed in product_data
-                        # 3. It has no remaining hours
-                        products_completed_today = []
-                        products_worked_today = [p['product_id'] for p in day_schedule['products']]
-                        
-                        for pid in products_worked_today:
-                            prod = product_data.get(pid)
-                            if prod and prod.get('completed', False):
-                                if len(prod.get('remainingHours', {})) == 0:
-                                    products_completed_today.append(pid)
-                        
-                        # Also check if any product that was worked on earlier days completed today
-                        # by checking if it has remaining hours that are now 0
-                        for pid, prod in product_data.items():
-                            if pid not in products_worked_today:  # Not worked on today
-                                continue
-                            if prod.get('completed', False) and pid not in products_completed_today:
-                                # Check if it just completed (has no remaining hours)
-                                if len(prod.get('remainingHours', {})) == 0:
-                                    products_completed_today.append(pid)
-                        
-                        # Calculate progress percentage
-                        progress_pct = (cumulative_completed / total_products_in_plan * 100) if total_products_in_plan > 0 else 0
+                        # Summary metrics
+                        total_days = len(schedule)
+                        total_products_scheduled = sum(len(day['products']) for day in schedule)
+                        avg_utilization = sum(day['total_hours'] for day in schedule) / (total_days * hours_per_day) * 100 if total_days > 0 else 0
                         
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            st.metric(
-                                "Products Completed",
-                                f"{cumulative_completed}",
-                                delta=f"+{len(products_completed_today)} today" if products_completed_today else None
-                            )
+                            st.metric("Total Days", total_days)
                         with col2:
-                            st.metric(
-                                "Products Remaining",
-                                f"{remaining_products}",
-                                delta=f"-{len(products_completed_today)}" if products_completed_today else None,
-                                delta_color="inverse"
-                            )
+                            st.metric("Total Product Runs", total_products_scheduled)
                         with col3:
-                            st.metric(
-                                "Total Products in Plan",
-                                f"{total_products_in_plan}",
-                            )
+                            st.metric("Avg Daily Utilization", f"{avg_utilization:.1f}%")
                         with col4:
-                            st.metric(
-                                "Progress",
-                                f"{progress_pct:.1f}%",
-                            )
-                        
-                        # Progress bar
-                        st.progress(progress_pct / 100)
-                        
-                        # Show completed products today if any
-                        if products_completed_today:
-                            st.success(f"✅ {len(products_completed_today)} product(s) completed today: {', '.join(products_completed_today)}")
-                        
-                        # Show remaining products if any
-                        if remaining_products > 0:
-                            remaining_product_ids = [pid for pid, prod in product_data.items() 
-                                                    if not prod.get('completed', False) 
-                                                    and st.session_state.plan_quantities.get(pid, 0) > 0]
-                            if remaining_product_ids:
-                                st.info(f"📋 {remaining_products} product(s) remaining: {', '.join(remaining_product_ids[:10])}" + 
-                                       (f" and {len(remaining_product_ids) - 10} more..." if len(remaining_product_ids) > 10 else ""))
+                            st.metric("Total Machines in Plan", len(all_machines_in_plan))
                         
                         st.divider()
                         
-                        # Product Progress Table - Cumulative by Day
-                        st.subheader("📈 Product Progress (Cumulative)")
-                        st.caption(f"Showing progress for all products up to Day {day_num}")
-                        
-                        # Build cumulative progress data
-                        progress_data = []
-                        cumulative_quantities = {}  # Track cumulative quantities up to this day
-                        
-                        # Sum up quantities from all previous days up to current day
-                        for prev_day_idx in range(day_idx + 1):
-                            prev_day = schedule[prev_day_idx]
-                            for pid, qty in prev_day.get('product_quantities', {}).items():
-                                cumulative_quantities[pid] = cumulative_quantities.get(pid, 0) + qty
-                        
-                        # Get all products in plan
-                        for product in st.session_state.products:
-                            pid = product['id']
-                            total_qty = st.session_state.plan_quantities.get(pid, 0)
-                            if total_qty > 0:
-                                completed_qty = cumulative_quantities.get(pid, 0)
-                                # Also check product_data for final completed quantity
-                                if pid in product_data:
-                                    completed_qty = product_data[pid].get('completedQuantity', completed_qty)
-                                
-                                progress_pct = (completed_qty / total_qty * 100) if total_qty > 0 else 0
-                                status = "✅ Complete" if completed_qty >= total_qty else "🔄 In Progress"
-                                
-                                progress_data.append({
-                                    "Product ID": pid,
-                                    "Product Name": product.get('name', pid),
-                                    "Completed": completed_qty,
-                                    "Total": total_qty,
-                                    "Progress": f"{completed_qty}/{total_qty}",
-                                    "Progress %": f"{progress_pct:.1f}%",
-                                    "Status": status
-                                })
-                        
-                        if progress_data:
-                            progress_df = pd.DataFrame(progress_data)
-                            # Sort by progress percentage (lowest first to see what needs attention)
-                            progress_df = progress_df.sort_values(by=['Progress %', 'Product ID'])
-                            st.dataframe(
-                                progress_df,
-                                use_container_width=True,
-                                hide_index=True
-                            )
+                        # Daily schedule table
+                        schedule_data = []
+                        for day_schedule in schedule:
+                            # Format products and machines for this day
+                            products_list = []
+                            machines_list = []
                             
-                            # Summary metrics
-                            total_units_planned = sum(p['Total'] for p in progress_data)
-                            total_units_completed = sum(p['Completed'] for p in progress_data)
-                            overall_progress = (total_units_completed / total_units_planned * 100) if total_units_planned > 0 else 0
+                            for prod in day_schedule['products']:
+                                products_list.append(f"{prod['product_id']} ({prod['units']} units)")
+                                machines_list.extend(prod['machines'])
                             
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Total Units Completed", f"{total_units_completed:,}")
-                            with col2:
-                                st.metric("Total Units Planned", f"{total_units_planned:,}")
-                            with col3:
-                                st.metric("Overall Progress", f"{overall_progress:.1f}%")
-                
-                # Download schedule
-                st.divider()
-                schedule_csv = schedule_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Schedule as CSV",
-                    data=schedule_csv,
-                    file_name="manufacturing_schedule.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.warning("Could not generate schedule. Please check your production plan.")
+                            # Remove duplicates from machines
+                            machines_used = sorted(set(machines_list))
+                            
+                            # Find idle machines (machines in plan but not used this day)
+                            idle_machines = sorted(set(all_machines_in_plan) - set(machines_used))
+                            
+                            schedule_data.append({
+                                "Day": day_schedule['day'],
+                                "Products": ", ".join(products_list) if products_list else "None",
+                                "Machines Used": ", ".join(machines_used) if machines_used else "None",
+                                "Idle Machines": ", ".join(idle_machines) if idle_machines else "None",
+                                "Machines Used / Total": f"{len(machines_used)} / {len(all_machines_in_plan)}",
+                                "Total Hours": f"{day_schedule['total_hours']:.2f}",
+                                "Utilization %": f"{(day_schedule['total_hours'] / hours_per_day * 100):.1f}%"
+                            })
+                        
+                        schedule_df = pd.DataFrame(schedule_data)
+                        st.dataframe(
+                            schedule_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        
+                        # Calculate total products in plan
+                        total_products_in_plan = len([p for p in st.session_state.products 
+                                                    if st.session_state.plan_quantities.get(p['id'], 0) > 0])
+                        
+                        # Track completion status day by day
+                        # We need to simulate day-by-day to track when products complete
+                        daily_completion_tracker = {}  # day -> {completed: [], remaining: []}
+                        products_completed_so_far = set()
+                        
+                        # Build a map of when products complete by checking remainingHours after each day
+                        for day_idx, day_schedule in enumerate(schedule):
+                            day_num = day_schedule['day']
+                            # Products worked on this day
+                            products_worked_today = set(p['product_id'] for p in day_schedule['products'])
+                            
+                            # Check which products completed (we'll check at end, but track incrementally)
+                            # For now, we'll calculate at display time based on current state
+                            daily_completion_tracker[day_num] = {
+                                'products_worked': products_worked_today,
+                                'completed': set(),
+                                'remaining': set()
+                            }
+                        
+                        # Detailed daily view
+                        st.subheader("📋 Detailed Daily Schedule")
+                        cumulative_completed = 0
+                        
+                        for day_idx, day_schedule in enumerate(schedule):
+                            day_num = day_schedule['day']
+                            
+                            # Calculate completed products up to this day
+                            # We need to check product_data state, but since it's final state,
+                            # we'll show current completion status
+                            completed_products = [pid for pid, prod in product_data.items() 
+                                                 if prod.get('completed', False)]
+                            cumulative_completed = len(completed_products)
+                            remaining_products = total_products_in_plan - cumulative_completed
+                            
+                            with st.expander(f"📅 Day {day_schedule['day']} - {day_schedule['total_hours']:.2f} hours ({len(day_schedule['products'])} products)"):
+                                # Products for this day (sorted by chunk hours)
+                                sorted_products = sorted(
+                                    day_schedule['products'],
+                                    key=lambda x: x.get('chunk_hours', x.get('time_hours', 0)),
+                                    reverse=True
+                                )
+                                
+                                for prod in sorted_products:
+                                    chunk_hours = prod.get('chunk_hours', prod.get('time_hours', 0))
+                                    is_coordinated = prod.get('coordinated', True)
+                                    
+                                    st.write(f"**{prod['product_id']}** - {chunk_hours:.2f} hours")
+                                    st.write(f"  - **Type:** {'Multi-op (Coordinated)' if is_coordinated else 'Single-op'}")
+                                    st.write(f"  - **Machines (all run simultaneously):** {', '.join(prod['machines'])}")
+                                    st.write(f"  - **Total Time:** {prod.get('time_hours', chunk_hours):.2f} hours")
+                                    st.write("---")
+                                
+                                # Machine utilization - show ALL machines in plan
+                                st.write("**Machine Utilization (All Machines in Plan):**")
+                                machine_util = {}
+                                
+                                # Get all machines from the plan
+                                all_machines = set()
+                                for product in st.session_state.products:
+                                    if st.session_state.plan_quantities.get(product['id'], 0) > 0:
+                                        for op in product['operations']:
+                                            all_machines.add(op['machine'])
+                                
+                                for machine in sorted(all_machines):
+                                    if machine in day_schedule['machine_end_times']:
+                                        # Machine was used
+                                        time_used = day_schedule['machine_end_times'].get(machine, 0) / 3600
+                                        util_pct = (time_used / hours_per_day) * 100
+                                        machine_util[machine] = {
+                                            'hours': time_used,
+                                            'utilization': util_pct,
+                                            'status': 'Used'
+                                        }
+                                    else:
+                                        # Machine is idle
+                                        machine_util[machine] = {
+                                            'hours': 0.0,
+                                            'utilization': 0.0,
+                                            'status': 'Idle'
+                                        }
+                                
+                                util_df = pd.DataFrame([
+                                    {
+                                        "Machine": machine,
+                                        "Status": data['status'],
+                                        "Hours Used": f"{data['hours']:.2f}",
+                                        "Utilization": f"{data['utilization']:.1f}%"
+                                    }
+                                    for machine, data in sorted(machine_util.items())
+                                ])
+                                st.dataframe(util_df, use_container_width=True, hide_index=True)
+                                
+                                # Show idle machines warning if any
+                                idle_count = sum(1 for data in machine_util.values() if data['status'] == 'Idle')
+                                if idle_count > 0:
+                                    idle_machines_list = [machine for machine, data in machine_util.items() if data['status'] == 'Idle']
+                                    st.warning(f"⚠️ {idle_count} machine(s) idle this day: {', '.join(idle_machines_list)}")
+                                
+                                st.divider()
+                                
+                                # Daily Progress Summary
+                                st.subheader("📊 Daily Progress Summary")
+                                
+                                # Calculate products completed today (newly completed)
+                                # A product is completed today if:
+                                # 1. It was worked on today
+                                # 2. It's marked as completed in product_data
+                                # 3. It has no remaining hours
+                                products_completed_today = []
+                                products_worked_today = [p['product_id'] for p in day_schedule['products']]
+                                
+                                for pid in products_worked_today:
+                                    prod = product_data.get(pid)
+                                    if prod and prod.get('completed', False):
+                                        if len(prod.get('remainingHours', {})) == 0:
+                                            products_completed_today.append(pid)
+                                
+                                # Also check if any product that was worked on earlier days completed today
+                                # by checking if it has remaining hours that are now 0
+                                for pid, prod in product_data.items():
+                                    if pid not in products_worked_today:  # Not worked on today
+                                        continue
+                                    if prod.get('completed', False) and pid not in products_completed_today:
+                                        # Check if it just completed (has no remaining hours)
+                                        if len(prod.get('remainingHours', {})) == 0:
+                                            products_completed_today.append(pid)
+                                
+                                # Calculate progress percentage
+                                progress_pct = (cumulative_completed / total_products_in_plan * 100) if total_products_in_plan > 0 else 0
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric(
+                                        "Products Completed",
+                                        f"{cumulative_completed}",
+                                        delta=f"+{len(products_completed_today)} today" if products_completed_today else None
+                                    )
+                                with col2:
+                                    st.metric(
+                                        "Products Remaining",
+                                        f"{remaining_products}",
+                                        delta=f"-{len(products_completed_today)}" if products_completed_today else None,
+                                        delta_color="inverse"
+                                    )
+                                with col3:
+                                    st.metric(
+                                        "Total Products in Plan",
+                                        f"{total_products_in_plan}",
+                                    )
+                                with col4:
+                                    st.metric(
+                                        "Progress",
+                                        f"{progress_pct:.1f}%",
+                                    )
+                                
+                                # Progress bar
+                                st.progress(progress_pct / 100)
+                                
+                                # Show completed products today if any
+                                if products_completed_today:
+                                    st.success(f"✅ {len(products_completed_today)} product(s) completed today: {', '.join(products_completed_today)}")
+                                
+                                # Show remaining products if any
+                                if remaining_products > 0:
+                                    remaining_product_ids = [pid for pid, prod in product_data.items() 
+                                                            if not prod.get('completed', False) 
+                                                            and st.session_state.plan_quantities.get(pid, 0) > 0]
+                                    if remaining_product_ids:
+                                        st.info(f"📋 {remaining_products} product(s) remaining: {', '.join(remaining_product_ids[:10])}" + 
+                                               (f" and {len(remaining_product_ids) - 10} more..." if len(remaining_product_ids) > 10 else ""))
+                                
+                                st.divider()
+                                
+                                # Product Progress Table - Cumulative by Day
+                                st.subheader("📈 Product Progress (Cumulative)")
+                                st.caption(f"Showing progress for all products up to Day {day_num}")
+                                
+                                # Build cumulative progress data
+                                progress_data = []
+                                cumulative_quantities = {}  # Track cumulative quantities up to this day
+                                
+                                # Sum up quantities from all previous days up to current day
+                                for prev_day_idx in range(day_idx + 1):
+                                    prev_day = schedule[prev_day_idx]
+                                    for pid, qty in prev_day.get('product_quantities', {}).items():
+                                        cumulative_quantities[pid] = cumulative_quantities.get(pid, 0) + qty
+                                
+                                # Get all products in plan
+                                for product in st.session_state.products:
+                                    pid = product['id']
+                                    total_qty = st.session_state.plan_quantities.get(pid, 0)
+                                    if total_qty > 0:
+                                        completed_qty = cumulative_quantities.get(pid, 0)
+                                        # Also check product_data for final completed quantity
+                                        if pid in product_data:
+                                            completed_qty = product_data[pid].get('completedQuantity', completed_qty)
+                                        
+                                        progress_pct = (completed_qty / total_qty * 100) if total_qty > 0 else 0
+                                        status = "✅ Complete" if completed_qty >= total_qty else "🔄 In Progress"
+                                        
+                                        progress_data.append({
+                                            "Product ID": pid,
+                                            "Product Name": product.get('name', pid),
+                                            "Completed": completed_qty,
+                                            "Total": total_qty,
+                                            "Progress": f"{completed_qty}/{total_qty}",
+                                            "Progress %": f"{progress_pct:.1f}%",
+                                            "Status": status
+                                        })
+                                
+                                if progress_data:
+                                    progress_df = pd.DataFrame(progress_data)
+                                    # Sort by progress percentage (lowest first to see what needs attention)
+                                    progress_df = progress_df.sort_values(by=['Progress %', 'Product ID'])
+                                    st.dataframe(
+                                        progress_df,
+                                        use_container_width=True,
+                                        hide_index=True
+                                    )
+                                    
+                                    # Summary metrics
+                                    total_units_planned = sum(p['Total'] for p in progress_data)
+                                    total_units_completed = sum(p['Completed'] for p in progress_data)
+                                    overall_progress = (total_units_completed / total_units_planned * 100) if total_units_planned > 0 else 0
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Total Units Completed", f"{total_units_completed:,}")
+                                    with col2:
+                                        st.metric("Total Units Planned", f"{total_units_planned:,}")
+                                    with col3:
+                                        st.metric("Overall Progress", f"{overall_progress:.1f}%")
+                        
+                        # Download schedule
+                        st.divider()
+                        schedule_csv = schedule_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Schedule as CSV",
+                            data=schedule_csv,
+                            file_name="manufacturing_schedule.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.warning("Could not generate schedule. Please check your production plan.")
+                except Exception as e:
+                    st.error(f"❌ Error generating schedule: {str(e)}")
+                    st.exception(e)
+                    st.session_state.schedule_generated = False
 
